@@ -10,6 +10,9 @@
 
 models.dev (opencode's model source) is updated manually via PRs and goes stale. This plugin consumes a static catalog maintained by GitHub Actions, so new models appear without waiting for anyone.
 
+> [!NOTE]
+> **Transparency:** this plugin, its catalog updater, and this documentation were generated and are maintained with AI assistance ([opencode](https://opencode.ai)). Review the code before trusting it with anything sensitive.
+
 ## Quick start
 
 ```bash

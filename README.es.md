@@ -10,6 +10,9 @@ Plugin de [opencode](https://opencode.ai) que registra el proveedor **Ollama Clo
 
 models.dev (la fuente de modelos de opencode) se actualiza manualmente por PR y se queda desactualizado. Este plugin consume un catálogo estático mantenido por GitHub Actions, así que los modelos nuevos aparecen sin esperar a nadie.
 
+> [!NOTE]
+> **Transparencia:** este plugin, su actualizador de catálogo y esta documentación fueron generados y son mantenidos con asistencia de IA ([opencode](https://opencode.ai)). Revisa el código antes de confiar en él para algo sensible.
+
 ## Inicio rápido
 
 ```bash
