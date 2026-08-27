@@ -2,7 +2,7 @@ name: update-catalog
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -33,6 +33,7 @@ jobs:
             git add catalog/
             git commit -m "chore: refresh ollama cloud catalog"
             git push
+            curl -s "https://purge.jsdelivr.net/gh/srnoob2570/opencode-ollama-cloud@main/catalog/catalog.json"
           else
             echo "Catalog unchanged, nothing to commit"
           fi

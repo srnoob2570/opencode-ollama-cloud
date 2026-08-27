@@ -10,13 +10,13 @@ models.dev (la fuente de modelos de opencode) se actualiza manualmente por PR y 
 
 ```
 ollama.com/v1/models ──┐
-                       ├─→ GitHub Action (cada 6h) ─→ catalog/catalog.json (auto-commit)
+                       ├─→ GitHub Action (cada 15 min) ─→ catalog/catalog.json (auto-commit)
 ollama.com/library/* ──┘
 
-catalog.json (jsDelivr / raw.githubusercontent / cache local) ─→ plugin ─→ opencode
+catalog.json (jsDelivr, purgado tras cada commit / raw.githubusercontent / cache local) ─→ plugin ─→ opencode
 ```
 
-**Action** (`.github/workflows/update.yml`): corre `bun scripts/update-catalog.ts update`.
+**Action** (`.github/workflows/update.yml`): corre `bun scripts/update-catalog.ts update` con cron cada 15 minutos (barato: el `check` es 1 GET a `/v1/models`; el scraping solo ocurre si la lista cambió). Peor caso de staleness ≈ 15 min + propagación CDN.
 
 - `check`: compara el hash de `{id, created}` de `/v1/models` contra el catálogo commiteado. Sin scraping.
 - `update`: si el hash cambió, scrapea `ollama.com/library/<base>` (1 request por familia, ~15 requests), enriquece con datos sembrados de models.dev (max output tokens, fechas de release) y escribe `catalog/catalog.json`. Si no cambió, no toca nada.
