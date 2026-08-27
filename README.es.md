@@ -1,10 +1,30 @@
 # @srnoob2570/opencode-ollama-cloud
 
+[![npm](https://img.shields.io/npm/v/@srnoob2570/opencode-ollama-cloud)](https://www.npmjs.com/package/@srnoob2570/opencode-ollama-cloud)
+[![Catalog update](https://github.com/srnoob2570/opencode-ollama-cloud/actions/workflows/update.yml/badge.svg)](https://github.com/srnoob2570/opencode-ollama-cloud/actions/workflows/update.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 [Read in English →](README.md)
 
-Plugin de [opencode](https://opencode.ai) que registra el proveedor **Ollama Cloud** con una lista de modelos siempre actualizada, tomada de `https://ollama.com/v1/models`.
+Plugin de [opencode](https://opencode.ai) que registra el proveedor **Ollama Cloud** con una lista de modelos siempre actualizada, tomada en vivo de `https://ollama.com/v1/models`.
 
-models.dev (la fuente de modelos de opencode) se actualiza manualmente por PR y se queda desactualizado. Este plugin consume un catálogo estático mantenido por GitHub Actions: la Action compara la lista live de `/v1/models` contra el catálogo commiteado y solo hace scraping + commit cuando la lista cambia.
+models.dev (la fuente de modelos de opencode) se actualiza manualmente por PR y se queda desactualizado. Este plugin consume un catálogo estático mantenido por GitHub Actions, así que los modelos nuevos aparecen sin esperar a nadie.
+
+## Inicio rápido
+
+```bash
+opencode plugin @srnoob2570/opencode-ollama-cloud
+```
+
+Eso es todo. Reinicia opencode y verifica:
+
+```bash
+opencode models | grep ollama-cloud
+```
+
+Deberías ver la lista live completa (ej. `ollama-cloud/glm-5.3-flash`), incluyendo modelos que models.dev aún no tiene.
+
+> Asume que ya configuraste tu API key de ollama.com (`opencode auth login` → `ollama-cloud`). Si el proveedor ya estaba registrado, el plugin solo refresca su lista de modelos.
 
 ## Cómo funciona
 
@@ -16,7 +36,7 @@ ollama.com/library/* ──┘
 catalog.json (jsDelivr, purgado tras cada commit / raw.githubusercontent / cache local) ─→ plugin ─→ opencode
 ```
 
-**Action** (`.github/workflows/update.yml`): corre `bun scripts/update-catalog.ts update` con cron cada 15 minutos (barato: el `check` es 1 GET a `/v1/models`; el scraping solo ocurre si la lista cambió). Peor caso de staleness ≈ 15 min + propagación CDN.
+**Action** (`.github/workflows/update.yml`): corre `bun scripts/update-catalog.ts update` con cron cada 15 minutos. Barato por diseño — el check es 1 GET a `/v1/models`; el scraping solo ocurre si la lista cambió. Peor caso de staleness ≈ 15 min + propagación CDN.
 
 - `check`: compara el hash de `{id, created}` de `/v1/models` contra el catálogo commiteado. Sin scraping.
 - `update`: si el hash cambió, scrapea `ollama.com/library/<base>` (1 request por familia, ~15 requests), enriquece con datos sembrados de models.dev (max output tokens, fechas de release) y escribe `catalog/catalog.json`. Si no cambió, no toca nada.
@@ -27,18 +47,9 @@ catalog.json (jsDelivr, purgado tras cada commit / raw.githubusercontent / cache
 2. Cache local en `~/.cache/opencode-ollama-cloud/catalog.json`
 3. Passthrough de models.dev (los modelos que opencode ya tiene)
 
-## Instalación
+## Instalación manual
 
-### Desde npm (cuando esté publicado)
-
-```bash
-opencode auth login
-# selecciona ollama-cloud y pega tu API key de ollama.com
-
-opencode install @srnoob2570/opencode-ollama-cloud
-```
-
-O agrega el plugin a `~/.config/opencode/opencode.json`:
+¿Prefieres editar la config a mano? Agrega el plugin a `~/.config/opencode/opencode.json`:
 
 ```json
 {
@@ -47,7 +58,7 @@ O agrega el plugin a `~/.config/opencode/opencode.json`:
 }
 ```
 
-### Local (desde el repo)
+### Local (desde un clon de este repo)
 
 ```json
 {
@@ -65,16 +76,6 @@ O agrega el plugin a `~/.config/opencode/opencode.json`:
 
 - `catalogUrl`: URL alternativa del catálogo (se intenta primero).
 - `timeoutMs`: timeout de cada fetch (default `5000`).
-
-## Uso
-
-Reinicia opencode y verifica:
-
-```bash
-opencode models
-```
-
-Deberías ver `ollama-cloud/<modelo>` con la lista live (incluye modelos nuevos como `glm-5.3-flash` que models.dev aún no tiene).
 
 ## Desarrollo
 
