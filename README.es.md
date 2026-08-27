@@ -1,4 +1,4 @@
-# opencode-ollama-cloud
+# @srnoob2570/opencode-ollama-cloud
 
 [Read in English →](README.md)
 
@@ -35,7 +35,7 @@ catalog.json (jsDelivr, purgado tras cada commit / raw.githubusercontent / cache
 opencode auth login
 # selecciona ollama-cloud y pega tu API key de ollama.com
 
-opencode install opencode-ollama-cloud
+opencode install @srnoob2570/opencode-ollama-cloud
 ```
 
 O agrega el plugin a `~/.config/opencode/opencode.json`:
@@ -43,7 +43,7 @@ O agrega el plugin a `~/.config/opencode/opencode.json`:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-ollama-cloud"]
+  "plugin": ["@srnoob2570/opencode-ollama-cloud"]
 }
 ```
 
@@ -59,7 +59,7 @@ O agrega el plugin a `~/.config/opencode/opencode.json`:
 
 ```json
 {
-  "plugin": [["opencode-ollama-cloud", { "catalogUrl": "https://mi-cdn/catalog.json" }]]
+  "plugin": [["@srnoob2570/opencode-ollama-cloud", { "catalogUrl": "https://mi-cdn/catalog.json" }]]
 }
 ```
 

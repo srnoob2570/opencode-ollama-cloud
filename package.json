@@ -1,6 +1,6 @@
 {
-  "name": "opencode-ollama-cloud",
-  "version": "0.1.0",
+  "name": "@srnoob2570/opencode-ollama-cloud",
+  "version": "0.1.1",
   "description": "opencode plugin: live Ollama Cloud model catalog (from ollama.com/v1/models), kept fresh by GitHub Actions",
   "type": "module",
   "license": "MIT",
@@ -15,9 +15,16 @@
     "ollama-cloud",
     "provider"
   ],
+  "main": "./plugin/index.ts",
   "exports": {
-    ".": "./plugin/index.ts"
+    ".": "./plugin/index.ts",
+    "./server": "./plugin/index.ts"
   },
+  "files": [
+    "plugin",
+    "catalog",
+    "catalog.schema.json"
+  ],
   "scripts": {
     "check": "bun scripts/update-catalog.ts check",
     "update": "bun scripts/update-catalog.ts update",
