@@ -1,0 +1,37 @@
+name: keepalive
+
+# Prevents GitHub from auto-disabling scheduled workflows after 60 days of
+# repository inactivity. update-catalog only commits when the model list
+# changes; if ollama ships no new models for 60+ days, this keeps the repo
+# active by touching a timestamp file once a month.
+on:
+  schedule:
+    # 03:13 UTC on day 1 of each month (off-peak minute)
+    - cron: "13 3 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  touch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update keepalive timestamp
+        run: |
+          mkdir -p .github
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .github/last-keepalive.txt
+
+      - name: Commit and push
+        run: |
+          if [[ -n "$(git status --porcelain .github/last-keepalive.txt)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/last-keepalive.txt
+            git commit -m "chore: monthly keepalive (prevent schedule auto-disable)"
+            git push
+          else
+            echo "Nothing to commit"
+          fi
