@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Ollama Cloud catalog",
+  "type": "object",
+  "required": ["provider", "generatedAt", "modelsHash", "models"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "provider": {
+      "type": "object",
+      "required": ["id", "name", "api", "npm", "env"],
+      "properties": {
+        "id": { "type": "string", "const": "ollama-cloud" },
+        "name": { "type": "string" },
+        "api": { "type": "string" },
+        "npm": { "type": "string" },
+        "env": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "modelsHash": { "type": "string" },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "created",
+          "family",
+          "capabilities",
+          "input",
+          "context",
+          "maxOutput",
+          "reasoningOptions",
+          "releaseDate"
+        ],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "created": { "type": "number" },
+          "family": { "type": "string" },
+          "capabilities": {
+            "type": "object",
+            "required": ["tools", "thinking", "vision"],
+            "properties": {
+              "tools": { "type": "boolean" },
+              "thinking": { "type": "boolean" },
+              "vision": { "type": "boolean" }
+            }
+          },
+          "input": {
+            "type": "array",
+            "items": { "enum": ["text", "image"] }
+          },
+          "context": { "type": "number", "minimum": 1 },
+          "maxOutput": { "type": "number", "minimum": 1 },
+          "reasoningOptions": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "releaseDate": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,38 @@
+name: update-catalog
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-catalog
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Update catalog (skips scraping if model list unchanged)
+        run: bun scripts/update-catalog.ts update
+
+      - name: Commit and push if changed
+        run: |
+          if [[ -n "$(git status --porcelain catalog/)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add catalog/
+            git commit -m "chore: refresh ollama cloud catalog"
+            git push
+          else
+            echo "Catalog unchanged, nothing to commit"
+          fi

@@ -1,0 +1,109 @@
+import type { Plugin } from "@opencode-ai/plugin"
+import type { Model as ModelV2 } from "@opencode-ai/sdk/v2"
+import {
+  PROVIDER_ID,
+  loadCatalog,
+  type Catalog,
+  type CatalogModel,
+  type PluginOpts,
+} from "./catalog.ts"
+
+const MODEL_OUTPUT_CAPS = {
+  text: true,
+  audio: false,
+  image: false,
+  video: false,
+  pdf: false,
+} as const
+
+function toModelV2(m: CatalogModel): ModelV2 {
+  const vision = m.capabilities.vision || m.input.includes("image")
+  const reasoning = m.capabilities.thinking
+  return {
+    id: m.id,
+    providerID: PROVIDER_ID,
+    api: {
+      id: m.id,
+      url: "https://ollama.com/v1",
+      npm: "@ai-sdk/openai-compatible",
+    },
+    name: m.name,
+    family: m.family,
+    capabilities: {
+      temperature: true,
+      reasoning,
+      attachment: vision,
+      toolcall: m.capabilities.tools,
+      interleaved: false,
+      input: {
+        text: true,
+        audio: false,
+        image: vision,
+        video: false,
+        pdf: false,
+      },
+      output: MODEL_OUTPUT_CAPS,
+    },
+    cost: {
+      input: 0,
+      output: 0,
+      cache: { read: 0, write: 0 },
+    },
+    limit: {
+      context: m.context,
+      output: m.maxOutput,
+    },
+    status: "active",
+    options: {},
+    headers: {},
+    release_date: m.releaseDate,
+  }
+}
+
+function toModels(catalog: Catalog): Record<string, ModelV2> {
+  const out: Record<string, ModelV2> = {}
+  for (const m of catalog.models) {
+    if (!m.id || typeof m.context !== "number" || m.context <= 0) continue
+    out[m.id] = toModelV2(m) as ModelV2
+  }
+  return out
+}
+
+const opencodeOllamaCloud: Plugin = async (_input, options) => {
+  const opts: PluginOpts = {
+    catalogUrl:
+      typeof options?.catalogUrl === "string" ? options.catalogUrl : undefined,
+    timeoutMs: typeof options?.timeoutMs === "number" ? options.timeoutMs : undefined,
+  }
+
+  const providerConfig = {
+    npm: "@ai-sdk/openai-compatible",
+    api: "https://ollama.com/v1",
+    name: "Ollama Cloud",
+    env: ["OLLAMA_API_KEY"],
+  }
+
+  return {
+    config: async (cfg) => {
+      cfg.provider ??= {}
+      cfg.provider[PROVIDER_ID] ??= { ...providerConfig }
+    },
+    provider: {
+      id: PROVIDER_ID,
+      models: async (provider) => {
+        try {
+          const catalog = await loadCatalog(opts)
+          if (catalog) {
+            const models = toModels(catalog)
+            if (Object.keys(models).length > 0) return models
+          }
+        } catch {
+          /* fall through to models.dev passthrough */
+        }
+        return provider.models
+      },
+    },
+  }
+}
+
+export default opencodeOllamaCloud
