@@ -1,9 +1,10 @@
 name: update-catalog
 
 on:
-  schedule:
-    # offset minutes to avoid the congested :00/:15/:30/:45 slots (GitHub delays/drops runs there)
-    - cron: "7,22,37,52 * * * *"
+  # scheduled from the self-hosted runner's crontab via workflow_dispatch API
+  # (GitHub's `schedule` trigger silently drops runs under load)
+  # schedule:
+  #   - cron: "*/10 * * * *"
   workflow_dispatch:
 
 permissions:
