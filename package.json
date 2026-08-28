@@ -28,6 +28,8 @@
   "scripts": {
     "check": "bun scripts/update-catalog.ts check",
     "update": "bun scripts/update-catalog.ts update",
+    "validate": "bun scripts/validate-catalog.ts",
+    "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
@@ -35,6 +37,7 @@
   },
   "devDependencies": {
     "@opencode-ai/plugin": "1.18.7",
+    "@opencode-ai/sdk": "1.18.7",
     "@types/bun": "^1.4.0",
     "@types/node": "^24.0.0",
     "typescript": "5.9.3"

@@ -17,15 +17,22 @@ jobs:
   update:
     # runs-on: ubuntu-latest
     runs-on: [self-hosted]
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          # pinned for reproducibility; bump deliberately
+          bun-version: 1.4.0
 
       - name: Update catalog (skips scraping if model list unchanged)
         run: bun scripts/update-catalog.ts update
+
+      - name: Validate catalog before publishing
+        # Gate: never auto-commit a catalog that fails isCatalog + sanity checks
+        # (e.g. a scrape regression producing context: 0).
+        run: bun scripts/validate-catalog.ts
 
       - name: Commit and push if changed
         run: |
@@ -35,7 +42,8 @@ jobs:
             git add catalog/
             git commit -m "chore: refresh ollama cloud catalog"
             git push
-            curl -s "https://purge.jsdelivr.net/gh/srnoob2570/opencode-ollama-cloud@main/catalog/catalog.json"
+            curl -sfS "https://purge.jsdelivr.net/gh/srnoob2570/opencode-ollama-cloud@main/catalog/catalog.json" \
+              || echo "::warning::jsDelivr purge failed; CDN may serve a stale catalog until its TTL expires"
           else
             echo "Catalog unchanged, nothing to commit"
           fi

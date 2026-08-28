@@ -17,11 +17,19 @@ type Catalog = BaseCatalog & { $schema: string }
 
 const DEFAULT_MAX_OUTPUT = 32768
 
-const titleCase = (base: string) =>
+// Uppercase only known acronyms. The old rule (length <= 3) also uppercased
+// ordinary short words, producing names like "Deepseek V4 PRO".
+const KNOWN_ACRONYMS = new Set(["gpt", "oss", "glm", "llm"])
+
+export const titleCase = (base: string) =>
   base
     .split(/[-_:]/)
     .filter(Boolean)
-    .map((part) => (part.length <= 3 && !/^\d/.test(part) ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1)))
+    .map((part) =>
+      KNOWN_ACRONYMS.has(part.toLowerCase())
+        ? part.toUpperCase()
+        : part.charAt(0).toUpperCase() + part.slice(1),
+    )
     .join(" ")
 
 const baseOf = (id: string) => (id.includes(":") ? id.slice(0, id.indexOf(":")) : id)
@@ -44,14 +52,18 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await res.json()) as T
 }
 
-function parseLibraryPage(html: string) {
+export function parseLibraryPage(html: string) {
   const result = {
     capabilities: { tools: false, thinking: false, vision: false },
     context: 0,
     input: ["text"] as string[],
   }
 
-  const chipRe = /inline-flex[^>]*>([a-z]+)</g
+  // Capability chips use rounded-md styling (verified against ollama.com/library
+  // markup, 2026-08). A looser inline-flex match would also catch version chips
+  // (rounded-full, e.g. "latest") and data-link chips — a version tag literally
+  // named "tools" would then falsely set capabilities.
+  const chipRe = /inline-flex items-center rounded-md[^>]*>([a-z]+)</g
   for (const chip of html.matchAll(chipRe)) {
     const value = chip[1]
     if (value === "tools") result.capabilities.tools = true
@@ -186,12 +198,23 @@ async function main() {
           .then((r) => (r.ok ? r.text() : ""))
           .catch(() => "")
         const parsed = parseLibraryPage(html)
-        if (html === "" && prevByBase.has(base)) {
-          // scrape failed; keep previous values so a refresh can't regress the catalog
+        // A fetch failure (html === "") and a markup change (page loads but no
+        // context line matches, so context stays 0) are the same failure mode:
+        // never let either regress the catalog to context: 0 + no capabilities.
+        const scrapeFailed = html === "" || parsed.context === 0
+        if (scrapeFailed && prevByBase.has(base)) {
+          // Keep previous values so a refresh can't regress the catalog.
           const prev = prevByBase.get(base)!
           parsed.capabilities = prev.capabilities
           parsed.context = prev.context
           parsed.input = prev.input
+        } else if (scrapeFailed) {
+          // No previous data to fall back on: abort the whole update rather
+          // than write a catalog that violates the schema (context minimum 1).
+          // CI fails loudly and the next scheduled run retries.
+          throw new Error(
+            `failed to scrape "ollama.com/library/${base}" (no context window found, no previous data to keep)`,
+          )
         }
         cache.set(base, parsed)
       }
@@ -231,7 +254,11 @@ async function main() {
   console.log(`catalog updated: ${merged.length} models, ${byBase.size} bases scraped`)
 }
 
-main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+// Guarded so tests and the validator can import pure functions (parseLibraryPage,
+// titleCase) without triggering an update run.
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
+}

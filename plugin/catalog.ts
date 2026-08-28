@@ -52,25 +52,35 @@ const DEFAULT_URLS = [
 const CACHE_DIR = join(homedir(), ".cache", "opencode-ollama-cloud")
 const CACHE_FILE = join(CACHE_DIR, "catalog.json")
 
-function isCatalog(value: unknown): value is Catalog {
+export function isCatalog(value: unknown): value is Catalog {
   if (typeof value !== "object" || value === null) return false
   const c = value as Catalog
   return (
     typeof c.provider?.id === "string" &&
+    typeof c.provider?.name === "string" &&
     typeof c.provider?.api === "string" &&
     typeof c.provider?.npm === "string" &&
+    Array.isArray(c.provider?.env) &&
     Array.isArray(c.models) &&
     c.models.every(
       (m) =>
         typeof m?.id === "string" &&
         typeof m?.name === "string" &&
         typeof m?.created === "number" &&
+        typeof m?.family === "string" &&
+        // schema requires >= 1; a bare typeof check would accept context: 0
+        // (what a library-page parse failure produces) and serve a broken model
         typeof m?.context === "number" &&
+        m.context >= 1 &&
         typeof m?.maxOutput === "number" &&
+        m.maxOutput >= 1 &&
         typeof m?.capabilities?.tools === "boolean" &&
         typeof m?.capabilities?.thinking === "boolean" &&
         typeof m?.capabilities?.vision === "boolean" &&
-        Array.isArray(m?.input),
+        Array.isArray(m?.input) &&
+        Array.isArray(m?.reasoningOptions) &&
+        // consumed downstream as ModelV2.release_date, a required string
+        typeof m?.releaseDate === "string",
     )
   )
 }
@@ -109,14 +119,38 @@ async function writeCache(catalog: Catalog): Promise<void> {
 
 export async function loadCatalog(opts: PluginOpts = {}): Promise<Catalog | null> {
   const timeoutMs = opts.timeoutMs ?? 5000
-  const urls = opts.catalogUrl ? [opts.catalogUrl, ...DEFAULT_URLS] : DEFAULT_URLS
 
-  for (const url of urls) {
-    const data = await fetchJson(url, timeoutMs)
+  // A user-configured URL keeps documented priority ("tried first") over the defaults.
+  if (opts.catalogUrl) {
+    const data = await fetchJson(opts.catalogUrl, timeoutMs)
     if (isCatalog(data)) {
       void writeCache(data)
       return data
     }
+  }
+
+  // Race the default mirrors in parallel: first response passing validation wins.
+  // Sequential tries cost up to urls.length * timeoutMs on a network outage before
+  // falling back to the disk cache.
+  const data = await new Promise<unknown>((resolve) => {
+    let pending = DEFAULT_URLS.length
+    let settled = false
+    for (const url of DEFAULT_URLS) {
+      void fetchJson(url, timeoutMs).then((d) => {
+        if (settled) return
+        if (isCatalog(d)) {
+          settled = true
+          resolve(d)
+        } else if (--pending === 0) {
+          resolve(null)
+        }
+      })
+    }
+  })
+
+  if (isCatalog(data)) {
+    void writeCache(data)
+    return data
   }
   return readCache()
 }

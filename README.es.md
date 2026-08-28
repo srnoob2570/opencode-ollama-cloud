@@ -39,10 +39,11 @@ ollama.com/library/* ──┘
 catalog.json (jsDelivr, purgado tras cada commit / raw.githubusercontent / cache local) ─→ plugin ─→ opencode
 ```
 
-**Action** (`.github/workflows/update.yml`): corre `bun scripts/update-catalog.ts update` con cron cada 15 minutos. Barato por diseño — el check es 1 GET a `/v1/models`; el scraping solo ocurre si la lista cambió. Peor caso de staleness ≈ 15 min + propagación CDN.
+**Action** (`.github/workflows/update.yml`): corre `bun scripts/update-catalog.ts update` con cron cada 15 minutos. Barato por diseño — el check es 1 GET a `/v1/models`; el scraping solo ocurre si la lista cambió (o una vez por semana, para refrescar los datos de enriquecimiento). El catálogo actualizado se valida (`bun scripts/validate-catalog.ts`) antes de commitear. Peor caso de staleness ≈ 15 min + propagación CDN.
 
 - `check`: compara el hash de `{id, created}` de `/v1/models` contra el catálogo commiteado. Sin scraping.
-- `update`: si el hash cambió, scrapea `ollama.com/library/<base>` (1 request por familia, ~15 requests), enriquece con datos sembrados de models.dev (max output tokens, fechas de release) y escribe `catalog/catalog.json`. Si no cambió, no toca nada.
+- `update`: si el hash cambió (o el catálogo tiene más de 7 días), scrapea `ollama.com/library/<base>` (1 request por familia, ~15 requests), enriquece con datos sembrados de models.dev (max output tokens, fechas de release) y escribe `catalog/catalog.json`. Si no cambió, no toca nada. Si un scrape falla y no hay datos previos que conservar, el update aborta en vez de publicar un catálogo degradado.
+- `validate`: puerta estructural y de sanidad para `catalog/catalog.json` (la usa CI; corréla localmente tras editar a mano).
 
 **Plugin** (`plugin/index.ts`): hook `config` registra el provider (idempotente) y hook `provider` devuelve los modelos normalizados al schema de opencode, con cascada de fallback:
 
