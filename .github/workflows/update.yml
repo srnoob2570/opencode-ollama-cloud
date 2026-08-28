@@ -16,8 +16,8 @@ concurrency:
 
 jobs:
   update:
-    # runs-on: ubuntu-latest
-    runs-on: [self-hosted]
+    # dedicated dockerless ephemeral runner pool (see ~/Documentos/self-hosted-actions)
+    runs-on: [self-hosted, catalog-dockerless]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
