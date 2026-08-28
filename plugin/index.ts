@@ -17,7 +17,11 @@ const MODEL_OUTPUT_CAPS = {
   pdf: false,
 } as const
 
-function toModelV2(m: CatalogModel): ModelV2 {
+// opencode takes plugin-returned models verbatim (no ProviderTransform pass), so
+// the effort tiers the TUI rotates between only exist if we emit them ourselves.
+// { reasoningEffort } is the payload opencode computes for @ai-sdk/openai-compatible,
+// and ollama.com/v1 maps reasoning_effort (low|medium|high|max) to its native think level.
+export function toModelV2(m: CatalogModel): ModelV2 {
   const vision = m.capabilities.vision || m.input.includes("image")
   const reasoning = m.capabilities.thinking
   return {
@@ -58,6 +62,14 @@ function toModelV2(m: CatalogModel): ModelV2 {
     options: {},
     headers: {},
     release_date: m.releaseDate,
+    variants: Object.fromEntries(
+      // isCatalog only checks that reasoningOptions is an array; a hand-edited
+      // or custom-URL catalog could carry non-strings, and garbage effort keys
+      // would surface in the TUI picker and 400 upstream.
+      m.reasoningOptions
+        .filter((effort): effort is string => typeof effort === "string")
+        .map((effort) => [effort, { reasoningEffort: effort }]),
+    ),
   }
 }
 
