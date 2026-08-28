@@ -52,11 +52,20 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await res.json()) as T
 }
 
+const INFO_LINE_RE =
+  /([A-Za-z]+ Usage|[0-9.]+[GM]B)\s*·\s*(\d+(?:\.\d+)?)\s*([KM])\s*context window\s*·\s*([^·<]+)/
+
 export function parseLibraryPage(html: string) {
   const result = {
     capabilities: { tools: false, thinking: false, vision: false },
     context: 0,
     input: ["text"] as string[],
+    // Per-tag specs from the variant cards on the same page, keyed by the full
+    // tag id as it appears there ("gemma4:31b", "gemma4:31b-cloud"). Tags can
+    // differ from the default the first info line describes — gemma4:latest is
+    // 128K while gemma4:31b is 256K — so tagged models must not inherit the
+    // family default blindly.
+    variants: new Map<string, { context: number; input: string[] }>(),
   }
 
   // Capability chips use rounded-md styling (verified against ollama.com/library
@@ -71,16 +80,45 @@ export function parseLibraryPage(html: string) {
     if (value === "vision") result.capabilities.vision = true
   }
 
-  const infoLine = html.match(
-    /([A-Za-z]+ Usage|[0-9.]+[GM]B)\s*·\s*(\d+(?:\.\d+)?)\s*([KM])\s*context window\s*·\s*([^·<]+)/,
-  )
+  const infoLine = html.match(INFO_LINE_RE)
   if (infoLine) {
     const n = Number(infoLine[2])
     result.context = Math.round(infoLine[3] === "K" ? n * 1024 : n * 1024 * 1024)
     result.input = parseInputTypes(infoLine[4])
   }
 
+  // Variant cards (mobile form — the desktop grid repeats the tag inside an
+  // <a>, which doesn't match): tag name, then its own info line. The gap is
+  // bounded so a card without a parseable info line is skipped instead of
+  // matching the next card's; a repeated tag keeps its first entry.
+  const cardRe = /text-neutral-800">([\w.\-]+:[\w.\-]+)<\/p>[\s\S]{0,600}?text-neutral-500">([^<]+)<\/p>/g
+  for (const card of html.matchAll(cardRe)) {
+    if (result.variants.has(card[1])) continue
+    const m = card[2].match(INFO_LINE_RE)
+    if (!m) continue
+    const n = Number(m[2])
+    result.variants.set(card[1], {
+      context: Math.round(m[3] === "K" ? n * 1024 : n * 1024 * 1024),
+      input: parseInputTypes(m[4]),
+    })
+  }
+
   return result
+}
+
+// Per-tag card for a /v1/models id. Pages key their cards three ways (verified
+// 2026-08): the bare tag ("gemma4:31b"), its cloud deployment
+// ("gemma4:31b-cloud", "qwen3.5:397b-cloud"), or, for cloud-only families,
+// "family:cloud" while /v1/models lists the bare id ("glm-5.3").
+export function cardFor(
+  parsed: ReturnType<typeof parseLibraryPage>,
+  id: string,
+): { context: number; input: string[] } | undefined {
+  return (
+    parsed.variants.get(id) ??
+    parsed.variants.get(`${id}-cloud`) ??
+    parsed.variants.get(`${id}:cloud`)
+  )
 }
 
 function parseInputTypes(text: string): string[] {
@@ -182,8 +220,11 @@ async function main() {
   }
 
   const cache = new Map<string, Awaited<ReturnType<typeof parseLibraryPage>>>()
-  const prevByBase = new Map<string, CatalogModel>()
-  for (const m of catalog.models) if (!prevByBase.has(m.family)) prevByBase.set(m.family, m)
+  // Previous rows per family, keyed per id: on scrape failure each tag restores
+  // its own specs instead of one family-wide value.
+  const prevByBase = new Map<string, CatalogModel[]>()
+  for (const m of catalog.models)
+    prevByBase.set(m.family, [...(prevByBase.get(m.family) ?? []), m])
   const models: CatalogModel[] = []
 
   // Scrape library pages with bounded concurrency instead of strictly sequentially.
@@ -203,11 +244,14 @@ async function main() {
         // never let either regress the catalog to context: 0 + no capabilities.
         const scrapeFailed = html === "" || parsed.context === 0
         if (scrapeFailed && prevByBase.has(base)) {
-          // Keep previous values so a refresh can't regress the catalog.
+          // Keep previous values so a refresh can't regress the catalog. Restored
+          // under the exact row id, which is the first key cardFor() tries.
           const prev = prevByBase.get(base)!
-          parsed.capabilities = prev.capabilities
-          parsed.context = prev.context
-          parsed.input = prev.input
+          for (const row of prev)
+            parsed.variants.set(row.id, { context: row.context, input: [...row.input] })
+          parsed.capabilities = prev[0].capabilities
+          parsed.context = prev[0].context
+          parsed.input = [...prev[0].input]
         } else if (scrapeFailed) {
           // No previous data to fall back on: abort the whole update rather
           // than write a catalog that violates the schema (context minimum 1).
@@ -226,14 +270,18 @@ async function main() {
 
     for (const variant of variants) {
       const tag = variant.id.includes(":") ? variant.id.split(":")[1] : ""
+      // Prefer the tag's own card over the family default — the first info
+      // line on the page describes the default tag only, and other tags can
+      // differ (gemma4:latest is 128K while gemma4:12b..:31b are 256K).
+      const card = cardFor(parsed, variant.id)
       models.push({
         id: variant.id,
         name: titleCase(base) + (tag ? ` (${tag})` : ""),
         created: variant.created,
         family: base,
         capabilities: parsed.capabilities,
-        input: parsed.input,
-        context: parsed.context,
+        input: card?.input ?? parsed.input,
+        context: card?.context ?? parsed.context,
         maxOutput: DEFAULT_MAX_OUTPUT,
         reasoningOptions: [],
         releaseDate: new Date(variant.created * 1000).toISOString().slice(0, 10),
@@ -247,7 +295,11 @@ async function main() {
     ...catalog,
     generatedAt: new Date().toISOString(),
     modelsHash: liveHash,
-    models: merged.sort((a, b) => b.created - a.created),
+    // /v1/models returns tags in no stable order and some share a created
+    // timestamp (gpt-oss:120b/:20b); the id tiebreak keeps regenerations of an
+    // unchanged model list from producing a reordered — and thus "changed" —
+    // catalog.
+    models: merged.sort((a, b) => b.created - a.created || a.id.localeCompare(b.id)),
   }
 
   await Bun.write(CATALOG_PATH, JSON.stringify(next, null, 2) + "\n")

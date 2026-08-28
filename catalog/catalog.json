@@ -9,7 +9,7 @@
       "OLLAMA_API_KEY"
     ]
   },
-  "generatedAt": "2026-08-28T18:18:48.316Z",
+  "generatedAt": "2026-08-28T20:40:43.875Z",
   "modelsHash": "e06ea128b326f65bf969a63418eba2277f53ca5e4b266ee92d049054d45609a4",
   "models": [
     {
@@ -255,7 +255,7 @@
         "text",
         "image"
       ],
-      "context": 131072,
+      "context": 262144,
       "maxOutput": 262144,
       "reasoningOptions": [],
       "releaseDate": "2026-04-02"

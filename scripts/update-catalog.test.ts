@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { isCatalog, type Catalog } from "../plugin/catalog.ts"
-import { parseLibraryPage, titleCase } from "./update-catalog.ts"
+import { cardFor, parseLibraryPage, titleCase } from "./update-catalog.ts"
 
 // Fixtures are representative excerpts of ollama.com/library/<model> markup as
 // observed 2026-08 (see repo audit): capability chips use `rounded-md`, version
@@ -65,6 +65,113 @@ describe("parseLibraryPage", () => {
   test("megabyte context windows convert to tokens", () => {
     const page = `<div>117GB · 1M context window · Text </div>`
     expect(parseLibraryPage(page).context).toBe(1024 * 1024)
+  })
+})
+
+// /library/<family> lists every tag as a card: tag name in text-neutral-800,
+// then the tag's own info line in text-neutral-500 (mobile form, extracted
+// from /library/gemma4 2026-08). The page hero (first info line) describes the
+// default tag only — gemma4:latest is 128K while the bigger tags are 256K,
+// which is how gemma4:31b inherited a wrong context before per-tag cards.
+const FAMILY_WITH_MIXED_TAGS = `
+<div class="my-3 flex flex-wrap space-x-2">
+  <span class="inline-flex items-center rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600 sm:text-[13px]">tools</span>
+  <span class="inline-flex items-center rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600 sm:text-[13px]">thinking</span>
+  <span class="inline-flex items-center rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600 sm:text-[13px]">vision</span>
+</div>
+<div>6.0GB · 128K context window · Text, Image </div>
+<a href="/library/gemma4:latest" class="sm:hidden flex flex-col space-y-[6px] group text-[13px] px-4 py-3">
+  <span class="flex items-center">
+    <p class="block group-hover:underline text-sm font-medium text-neutral-800">gemma4:latest</p>
+  </span>
+  <p class="flex text-neutral-500">6.0GB · 128K context window · Text, Image · 2 months ago</p>
+</a>
+<a href="/library/gemma4:31b" class="sm:hidden flex flex-col space-y-[6px] group text-[13px] px-4 py-3">
+  <span class="flex items-center">
+    <p class="block group-hover:underline text-sm font-medium text-neutral-800">gemma4:31b</p>
+  </span>
+  <p class="flex text-neutral-500">15GB · 256K context window · Text, Image · 2 months ago</p>
+</a>
+<a href="/library/gemma4:31b-cloud" class="sm:hidden flex flex-col space-y-[6px] group text-[13px] px-4 py-3">
+  <span class="flex items-center">
+    <p class="block group-hover:underline text-sm font-medium text-neutral-800">gemma4:31b-cloud</p>
+  </span>
+  <p class="flex text-neutral-500">High Usage · 256K context window · Text, Image · 2 months ago</p>
+</a>
+`
+
+// Cloud-only families (glm-5.3, kimi-k3): /v1/models lists the bare id and the
+// page's only card is "family:cloud" (colon form). Families served per-tag
+// under a cloud deployment list "tag-cloud" cards (dash form, e.g.
+// qwen3.5:397b) — the only card for that tag.
+const CLOUD_FAMILY = `
+<span class="inline-flex items-center rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600 sm:text-[13px]">tools</span>
+<span class="inline-flex items-center rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600 sm:text-[13px]">thinking</span>
+<div>High Usage · 1M context window · Text </div>
+<a href="/library/glm-5.3:cloud" class="sm:hidden flex flex-col space-y-[6px] group text-[13px] px-4 py-3">
+  <span class="flex items-center">
+    <p class="block group-hover:underline text-sm font-medium text-neutral-800">glm-5.3:cloud</p>
+  </span>
+  <p class="flex text-neutral-500">High Usage · 1M context window · Text · 3 weeks ago</p>
+</a>
+<a href="/library/qwen3.5:397b-cloud" class="sm:hidden flex flex-col space-y-[6px] group text-[13px] px-4 py-3">
+  <span class="flex items-center">
+    <p class="block group-hover:underline text-sm font-medium text-neutral-800">qwen3.5:397b-cloud</p>
+  </span>
+  <p class="flex text-neutral-500">High Usage · 256K context window · Text, Image · 3 weeks ago</p>
+</a>
+`
+
+describe("parseLibraryPage per-tag cards", () => {
+  test("collects each tag's card specs alongside the family default", () => {
+    const parsed = parseLibraryPage(FAMILY_WITH_MIXED_TAGS)
+    expect(parsed.context).toBe(128 * 1024)
+    expect(parsed.variants.get("gemma4:latest")).toEqual({
+      context: 128 * 1024,
+      input: ["text", "image"],
+    })
+    expect(parsed.variants.get("gemma4:31b")).toEqual({
+      context: 256 * 1024,
+      input: ["text", "image"],
+    })
+    expect(parsed.variants.get("gemma4:31b-cloud")).toEqual({
+      context: 256 * 1024,
+      input: ["text", "image"],
+    })
+  })
+
+  test("a card whose info line drifted is skipped, not given the next card's specs", () => {
+    const page = `
+      <p class="text-neutral-800">gemma4:31b</p>
+      <p class="text-neutral-500">15GB download · Text, Image</p>
+      <p class="text-neutral-800">gemma4:12b</p>
+      <p class="text-neutral-500">7.6GB · 256K context window · Text, Image</p>
+    `
+    const parsed = parseLibraryPage(page)
+    expect(parsed.variants.has("gemma4:31b")).toBe(false)
+    expect(parsed.variants.get("gemma4:12b")?.context).toBe(256 * 1024)
+  })
+})
+
+describe("cardFor", () => {
+  test("bare tags resolve to their own card", () => {
+    const parsed = parseLibraryPage(FAMILY_WITH_MIXED_TAGS)
+    expect(cardFor(parsed, "gemma4:31b")).toEqual({ context: 256 * 1024, input: ["text", "image"] })
+  })
+
+  test("tags without a card fall through to undefined (family default upstream)", () => {
+    const parsed = parseLibraryPage(FAMILY_WITH_MIXED_TAGS)
+    expect(cardFor(parsed, "gemma4:e2b")).toBeUndefined()
+  })
+
+  test("bare cloud ids resolve to their family:cloud card (glm-5.3)", () => {
+    const parsed = parseLibraryPage(CLOUD_FAMILY)
+    expect(cardFor(parsed, "glm-5.3")).toEqual({ context: 1024 * 1024, input: ["text"] })
+  })
+
+  test("tagged cloud-only ids resolve to their tag-cloud card (qwen3.5:397b)", () => {
+    const parsed = parseLibraryPage(CLOUD_FAMILY)
+    expect(cardFor(parsed, "qwen3.5:397b")).toEqual({ context: 256 * 1024, input: ["text", "image"] })
   })
 })
 
