@@ -9,9 +9,31 @@
       "OLLAMA_API_KEY"
     ]
   },
-  "generatedAt": "2026-08-27T17:37:48.268Z",
-  "modelsHash": "919f79e9eddd9885e64bf26e638d3b87e840002adf7a5c25e2ae3a43b3afc2c3",
+  "generatedAt": "2026-08-28T18:18:48.316Z",
+  "modelsHash": "e06ea128b326f65bf969a63418eba2277f53ca5e4b266ee92d049054d45609a4",
   "models": [
+    {
+      "id": "glm-5.3",
+      "name": "GLM 5.3",
+      "created": 1787929200,
+      "family": "glm-5.3",
+      "capabilities": {
+        "tools": true,
+        "thinking": true,
+        "vision": false
+      },
+      "input": [
+        "text"
+      ],
+      "context": 1048576,
+      "maxOutput": 131072,
+      "reasoningOptions": [
+        "low",
+        "high",
+        "max"
+      ],
+      "releaseDate": "2026-08-14"
+    },
     {
       "id": "glm-5.3-flash",
       "name": "GLM 5.3 Flash",
@@ -37,7 +59,7 @@
     },
     {
       "id": "deepseek-v4-pro:0813",
-      "name": "Deepseek V4 PRO (0813)",
+      "name": "Deepseek V4 Pro (0813)",
       "created": 1786633200,
       "family": "deepseek-v4-pro",
       "capabilities": {
