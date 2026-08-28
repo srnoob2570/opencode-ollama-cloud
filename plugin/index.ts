@@ -63,8 +63,12 @@ function toModelV2(m: CatalogModel): ModelV2 {
 function toModels(catalog: Catalog): Record<string, ModelV2> {
   const out: Record<string, ModelV2> = {}
   for (const m of catalog.models) {
-    if (!m.id || typeof m.context !== "number" || m.context <= 0) continue
-    out[m.id] = toModelV2(m) as ModelV2
+    try {
+      if (!m.id || typeof m.context !== "number" || m.context <= 0) continue
+      out[m.id] = toModelV2(m)
+    } catch {
+      /* skip malformed entry instead of dropping the whole list */
+    }
   }
   return out
 }
@@ -97,8 +101,12 @@ const opencodeOllamaCloud: Plugin = async (_input, options) => {
             const models = toModels(catalog)
             if (Object.keys(models).length > 0) return models
           }
-        } catch {
-          /* fall through to models.dev passthrough */
+          console.warn("[opencode-ollama-cloud] no usable catalog, falling back to models.dev models")
+        } catch (err) {
+          console.warn(
+            "[opencode-ollama-cloud] catalog load failed, falling back to models.dev models:",
+            err,
+          )
         }
         return provider.models
       },

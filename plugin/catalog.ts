@@ -57,7 +57,11 @@ function isCatalog(value: unknown): value is Catalog {
         typeof m?.name === "string" &&
         typeof m?.created === "number" &&
         typeof m?.context === "number" &&
-        typeof m?.maxOutput === "number",
+        typeof m?.maxOutput === "number" &&
+        typeof m?.capabilities?.tools === "boolean" &&
+        typeof m?.capabilities?.thinking === "boolean" &&
+        typeof m?.capabilities?.vision === "boolean" &&
+        Array.isArray(m?.input),
     )
   )
 }

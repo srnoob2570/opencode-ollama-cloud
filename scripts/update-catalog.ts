@@ -1,5 +1,5 @@
-import { $ } from "bun"
 import { createHash } from "node:crypto"
+import type { Catalog as BaseCatalog, CatalogModel } from "../plugin/catalog.ts"
 
 const MODELS_API = "https://ollama.com/v1/models"
 const LIBRARY_URL = (base: string) => `https://ollama.com/library/${base}`
@@ -9,36 +9,7 @@ const CATALOG_PATH = new URL("../catalog/catalog.json", import.meta.url).pathnam
 
 type OllamaModel = { id: string; object: string; created: number; owned_by: string }
 
-type CatalogModel = {
-  id: string
-  name: string
-  created: number
-  family: string
-  capabilities: {
-    tools: boolean
-    thinking: boolean
-    vision: boolean
-  }
-  input: string[]
-  context: number
-  maxOutput: number
-  reasoningOptions: string[]
-  releaseDate: string
-}
-
-type Catalog = {
-  $schema: string
-  provider: {
-    id: "ollama-cloud"
-    name: string
-    api: string
-    npm: string
-    env: string[]
-  }
-  generatedAt: string
-  modelsHash: string
-  models: CatalogModel[]
-}
+type Catalog = BaseCatalog & { $schema: string }
 
 const DEFAULT_MAX_OUTPUT = 32768
 
@@ -99,30 +70,33 @@ function parseInputTypes(text: string): string[] {
   return input.length ? input : ["text"]
 }
 
-function seedLookup(seed: Record<string, any>, id: string, family: string): Record<string, any> | undefined {
-  const collect = (providerIds?: string[]) => {
-    const byId: Record<string, any> = {}
-    const byFamily: Record<string, any> = {}
-    for (const [provId, provider] of Object.entries<any>(seed)) {
-      if (providerIds && !providerIds.includes(provId)) continue
-      for (const [modelId, model] of Object.entries<any>(provider?.models ?? {})) {
-        byId[modelId] ??= model
-        const base = modelId.split(":")[0]
-        byFamily[base] ??= model
-      }
+function buildSeedIndex(seed: Record<string, any>, providerIds?: string[]) {
+  const byId: Record<string, any> = {}
+  const byFamily: Record<string, any> = {}
+  for (const [provId, provider] of Object.entries<any>(seed)) {
+    if (providerIds && !providerIds.includes(provId)) continue
+    for (const [modelId, model] of Object.entries<any>(provider?.models ?? {})) {
+      byId[modelId] ??= model
+      const base = modelId.split(":")[0]
+      byFamily[base] ??= model
     }
-    return { byId, byFamily }
   }
+  return { byId, byFamily }
+}
 
-  const pick = ({ byId, byFamily }: ReturnType<typeof collect>) =>
-    byId[id] ?? byId[family] ?? byFamily[family] ?? byFamily[id]
-
-  return pick(collect(["ollama-cloud"])) ?? pick(collect())
+function seedPick(
+  { byId, byFamily }: ReturnType<typeof buildSeedIndex>,
+  id: string,
+  family: string,
+) {
+  return byId[id] ?? byId[family] ?? byFamily[family] ?? byFamily[id]
 }
 
 function mergeSeed(catalogModels: CatalogModel[], seed: Record<string, any>): CatalogModel[] {
+  const prioritized = buildSeedIndex(seed, ["ollama-cloud"])
+  const all = buildSeedIndex(seed)
   return catalogModels.map((m) => {
-    const s = seedLookup(seed, m.id, m.family)
+    const s = seedPick(prioritized, m.id, m.family) ?? seedPick(all, m.id, m.family)
     return {
       ...m,
       maxOutput: s?.limit?.output ?? m.maxOutput,
@@ -173,10 +147,17 @@ async function main() {
     process.exit(1)
   }
 
-  if (catalog.modelsHash === liveHash) {
+  // Re-scrape weekly even when the /v1/models hash is unchanged, so enrichment
+  // data (context windows, capabilities, seed info) for existing models gets refreshed.
+  const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
+  const stale =
+    !catalog.generatedAt || Date.now() - Date.parse(catalog.generatedAt) > STALE_AFTER_MS
+
+  if (catalog.modelsHash === liveHash && !stale) {
     console.log("catalog already up to date")
     process.exit(0)
   }
+  if (stale) console.log("catalog stale; forcing refresh")
 
   const seed = await fetchJson<Record<string, any>>(MODEL_SEED_URL).catch(() => ({}))
 
@@ -187,18 +168,38 @@ async function main() {
   }
 
   const cache = new Map<string, Awaited<ReturnType<typeof parseLibraryPage>>>()
+  const prevByBase = new Map<string, CatalogModel>()
+  for (const m of catalog.models) if (!prevByBase.has(m.family)) prevByBase.set(m.family, m)
   const models: CatalogModel[] = []
 
+  // Scrape library pages with bounded concurrency instead of strictly sequentially.
+  const bases = [...byBase.keys()]
+  const SCRAPE_CONCURRENCY = 5
+  let cursor = 0
+  await Promise.all(
+    Array.from({ length: Math.min(SCRAPE_CONCURRENCY, bases.length) }, async () => {
+      while (cursor < bases.length) {
+        const base = bases[cursor++]
+        const html = await fetch(LIBRARY_URL(base), {
+          headers: { "user-agent": "opencode-ollama-cloud-updater" },
+          signal: AbortSignal.timeout(20_000),
+        })
+          .then((r) => (r.ok ? r.text() : ""))
+          .catch(() => "")
+        const parsed = parseLibraryPage(html)
+        if (html === "" && prevByBase.has(base)) {
+          // scrape failed; keep previous values so a refresh can't regress the catalog
+          const prev = prevByBase.get(base)!
+          parsed.capabilities = prev.capabilities
+          parsed.context = prev.context
+          parsed.input = prev.input
+        }
+        cache.set(base, parsed)
+      }
+    }),
+  )
+
   for (const [base, variants] of byBase) {
-    if (!cache.has(base)) {
-      const html = await fetch(LIBRARY_URL(base), {
-        headers: { "user-agent": "opencode-ollama-cloud-updater" },
-        signal: AbortSignal.timeout(20_000),
-      })
-        .then((r) => (r.ok ? r.text() : ""))
-        .catch(() => "")
-      cache.set(base, parseLibraryPage(html))
-    }
     const parsed = cache.get(base)!
 
     for (const variant of variants) {
