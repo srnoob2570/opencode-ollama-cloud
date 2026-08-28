@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto"
-import type { Catalog as BaseCatalog, CatalogModel } from "../plugin/catalog.ts"
+import {
+  PROVIDER_CONFIG,
+  type Catalog as BaseCatalog,
+  type CatalogModel,
+} from "../plugin/catalog.ts"
 
 const MODELS_API = "https://ollama.com/v1/models"
 const LIBRARY_URL = (base: string) => `https://ollama.com/library/${base}`
@@ -7,7 +11,7 @@ const MODEL_SEED_URL = "https://models.dev/api.json"
 
 const CATALOG_PATH = new URL("../catalog/catalog.json", import.meta.url).pathname
 
-type OllamaModel = { id: string; object: string; created: number; owned_by: string }
+type OllamaModel = { id: string; created: number }
 
 type Catalog = BaseCatalog & { $schema: string }
 
@@ -27,11 +31,15 @@ const hashOf = (models: OllamaModel[]) =>
     .update(models.map((m) => `${m.id}:${m.created}`).sort().join("|"))
     .digest("hex")
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, {
+function fetchWithTimeout(url: string): Promise<Response> {
+  return fetch(url, {
     headers: { "user-agent": "opencode-ollama-cloud-updater" },
     signal: AbortSignal.timeout(20_000),
   })
+}
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const res = await fetchWithTimeout(url)
   if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`)
   return (await res.json()) as T
 }
@@ -109,13 +117,7 @@ function mergeSeed(catalogModels: CatalogModel[], seed: Record<string, any>): Ca
 function buildEmptyCatalog(): Catalog {
   return {
     $schema: "./catalog.schema.json",
-    provider: {
-      id: "ollama-cloud",
-      name: "Ollama Cloud",
-      api: "https://ollama.com/v1",
-      npm: "@ai-sdk/openai-compatible",
-      env: ["OLLAMA_API_KEY"],
-    },
+    provider: { ...PROVIDER_CONFIG, env: [...PROVIDER_CONFIG.env] },
     generatedAt: "",
     modelsHash: "",
     models: [],
@@ -180,10 +182,7 @@ async function main() {
     Array.from({ length: Math.min(SCRAPE_CONCURRENCY, bases.length) }, async () => {
       while (cursor < bases.length) {
         const base = bases[cursor++]
-        const html = await fetch(LIBRARY_URL(base), {
-          headers: { "user-agent": "opencode-ollama-cloud-updater" },
-          signal: AbortSignal.timeout(20_000),
-        })
+        const html = await fetchWithTimeout(LIBRARY_URL(base))
           .then((r) => (r.ok ? r.text() : ""))
           .catch(() => "")
         const parsed = parseLibraryPage(html)

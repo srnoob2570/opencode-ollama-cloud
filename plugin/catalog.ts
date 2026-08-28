@@ -4,6 +4,15 @@ import { join } from "node:path"
 
 export const PROVIDER_ID = "ollama-cloud"
 
+/** Single source of truth for the provider identity (kept in sync with catalog.schema.json). */
+export const PROVIDER_CONFIG: Catalog["provider"] = {
+  id: PROVIDER_ID,
+  name: "Ollama Cloud",
+  api: "https://ollama.com/v1",
+  npm: "@ai-sdk/openai-compatible",
+  env: ["OLLAMA_API_KEY"],
+}
+
 export interface CatalogModel {
   id: string
   name: string

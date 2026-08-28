@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import type { Model as ModelV2 } from "@opencode-ai/sdk/v2"
 import {
+  PROVIDER_CONFIG,
   PROVIDER_ID,
   loadCatalog,
   type Catalog,
@@ -61,15 +62,9 @@ function toModelV2(m: CatalogModel): ModelV2 {
 }
 
 function toModels(catalog: Catalog): Record<string, ModelV2> {
+  // Entries were already validated by isCatalog in loadCatalog/readCache.
   const out: Record<string, ModelV2> = {}
-  for (const m of catalog.models) {
-    try {
-      if (!m.id || typeof m.context !== "number" || m.context <= 0) continue
-      out[m.id] = toModelV2(m)
-    } catch {
-      /* skip malformed entry instead of dropping the whole list */
-    }
-  }
+  for (const m of catalog.models) out[m.id] = toModelV2(m)
   return out
 }
 
@@ -80,12 +75,7 @@ const opencodeOllamaCloud: Plugin = async (_input, options) => {
     timeoutMs: typeof options?.timeoutMs === "number" ? options.timeoutMs : undefined,
   }
 
-  const providerConfig = {
-    npm: "@ai-sdk/openai-compatible",
-    api: "https://ollama.com/v1",
-    name: "Ollama Cloud",
-    env: ["OLLAMA_API_KEY"],
-  }
+  const { id: _id, ...providerConfig } = PROVIDER_CONFIG
 
   return {
     config: async (cfg) => {
