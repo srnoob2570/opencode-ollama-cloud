@@ -1,0 +1,51 @@
+name: publish
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  # OIDC: npm exchanges this runner's short-lived token for publish auth —
+  # no npm token secret involved. Both permissions are least-privilege for a
+  # publish (checkout + attest provenance).
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    # npm trusted publishing only works on GitHub-hosted runners (self-hosted
+    # are not supported yet), so this deliberately does not use the
+    # [self-hosted, dockerless] pool the catalog update runs on.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24 # needs npm >= 11.5.1 for OIDC publish
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Refuse to publish when the tag doesn't match package.json
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [[ "$GITHUB_REF_NAME" != "v$PKG_VERSION" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME doesn't match package.json version $PKG_VERSION"
+            exit 1
+          fi
+
+      # Re-pushing a tag (history rewrite, run retry) must not fail on the
+      # version already being on the registry.
+      - name: Skip when this version is already published
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if npm view "@srnoob2570/opencode-ollama-cloud@$PKG_VERSION" version >/dev/null 2>&1; then
+            echo "already on the registry, nothing to publish"
+            echo "skip=true" >> "$GITHUB_ENV"
+          fi
+
+      # No NODE_AUTH_TOKEN: trusted publishing authenticates via the OIDC token
+      # npmjs.com was told to trust for this repo + workflow filename.
+      - run: npm publish --access public
+        if: env.skip != 'true'
