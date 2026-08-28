@@ -16,7 +16,6 @@ concurrency:
 
 jobs:
   update:
-    # dedicated dockerless ephemeral runner pool (see ~/Documentos/self-hosted-actions)
     runs-on: [self-hosted, catalog-dockerless]
     timeout-minutes: 10
     steps:
@@ -24,15 +23,12 @@ jobs:
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          # pinned for reproducibility; bump deliberately
           bun-version: 1.4.0
 
       - name: Update catalog (skips scraping if model list unchanged)
         run: bun scripts/update-catalog.ts update
 
       - name: Validate catalog before publishing
-        # Gate: never auto-commit a catalog that fails isCatalog + sanity checks
-        # (e.g. a scrape regression producing context: 0).
         run: bun scripts/validate-catalog.ts
 
       - name: Commit and push if changed
