@@ -22,7 +22,7 @@ opencode plugin @srnoob2570/opencode-ollama-cloud
 Eso es todo. Reinicia opencode y verifica:
 
 ```bash
-opencode models | grep ollama-cloud
+opencode models ollama-cloud --refresh
 ```
 
 Deberías ver la lista live completa (ej. `ollama-cloud/glm-5.3-flash`), incluyendo modelos que models.dev aún no tiene.
