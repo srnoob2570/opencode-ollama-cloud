@@ -43,3 +43,14 @@ describe("toModelV2 variants", () => {
     expect(toModelV2(GLM53).capabilities.reasoning).toBe(true)
   })
 })
+
+describe("toModelV2 interleaved", () => {
+  test("thinking models replay reasoning via ollama's `reasoning` wire field", () => {
+    expect(toModelV2(GLM53).capabilities.interleaved).toEqual({ field: "reasoning" })
+  })
+
+  test("non-thinking models keep interleaved off (no reasoning parts to replay)", () => {
+    const noThink = { ...GLM53, capabilities: { tools: true, thinking: false, vision: false } }
+    expect(toModelV2(noThink).capabilities.interleaved).toBe(false)
+  })
+})

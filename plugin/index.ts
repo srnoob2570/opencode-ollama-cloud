@@ -39,7 +39,12 @@ export function toModelV2(m: CatalogModel): ModelV2 {
       reasoning,
       attachment: vision,
       toolcall: m.capabilities.tools,
-      interleaved: false,
+      // ollama's OpenAI-compatible endpoint reads prior-turn assistant
+      // thinking from each message's `reasoning` field (openai.go: Thinking:
+      // msg.Reasoning), not the `reasoning_content` field the AI SDK sends by
+      // default. Naming the field is what makes opencode route stored
+      // reasoning parts into a format ollama actually parses back in.
+      interleaved: reasoning ? { field: "reasoning" } : false,
       input: {
         text: true,
         audio: false,
