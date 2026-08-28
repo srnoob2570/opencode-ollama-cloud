@@ -16,8 +16,10 @@ models.dev (opencode's model source) is updated manually via PRs and goes stale.
 ## Quick start
 
 ```bash
-opencode plugin @srnoob2570/opencode-ollama-cloud
+opencode plugin @srnoob2570/opencode-ollama-cloud --force --global
 ```
+
+`--force` replaces an already-installed version — opencode has no plugin update command, so re-running this command is how you upgrade. `--global` installs into `~/.config/opencode/opencode.json` instead of a project-local config.
 
 That's it. Restart opencode and check:
 
