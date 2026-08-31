@@ -21,9 +21,13 @@ const MODEL_OUTPUT_CAPS = {
 // the effort tiers the TUI rotates between only exist if we emit them ourselves.
 // { reasoningEffort } is the payload opencode computes for @ai-sdk/openai-compatible,
 // and ollama.com/v1 maps reasoning_effort (low|medium|high|max) to its native think level.
-export function toModelV2(m: CatalogModel): ModelV2 {
+export function toModelV2(m: CatalogModel, pricing: "off" | "reference" = "off"): ModelV2 {
   const vision = m.capabilities.vision || m.input.includes("image")
   const reasoning = m.capabilities.thinking
+  // prices are USD per 1M tokens — opencode's CostV2 contract. Reference costs
+  // are opt-in: default off keeps the counter at $0.00, and a model without
+  // pricing data stays at $0 in both modes (no partial estimates).
+  const ref = pricing === "reference" ? m.pricing : undefined
   return {
     id: m.id,
     providerID: PROVIDER_ID,
@@ -55,8 +59,8 @@ export function toModelV2(m: CatalogModel): ModelV2 {
       output: MODEL_OUTPUT_CAPS,
     },
     cost: {
-      input: 0,
-      output: 0,
+      input: ref ? ref.input : 0,
+      output: ref ? ref.output : 0,
       cache: { read: 0, write: 0 },
     },
     limit: {
@@ -78,18 +82,20 @@ export function toModelV2(m: CatalogModel): ModelV2 {
   }
 }
 
-function toModels(catalog: Catalog): Record<string, ModelV2> {
+function toModels(catalog: Catalog, pricing: "off" | "reference"): Record<string, ModelV2> {
   // Entries were already validated by isCatalog in loadCatalog/readCache.
   const out: Record<string, ModelV2> = {}
-  for (const m of catalog.models) out[m.id] = toModelV2(m)
+  for (const m of catalog.models) out[m.id] = toModelV2(m, pricing)
   return out
 }
 
 const opencodeOllamaCloud: Plugin = async (_input, options) => {
+  const pricing: "off" | "reference" = options?.pricing === "reference" ? "reference" : "off"
   const opts: PluginOpts = {
     catalogUrl:
       typeof options?.catalogUrl === "string" ? options.catalogUrl : undefined,
     timeoutMs: typeof options?.timeoutMs === "number" ? options.timeoutMs : undefined,
+    pricing,
   }
 
   const { id: _id, ...providerConfig } = PROVIDER_CONFIG
@@ -105,7 +111,7 @@ const opencodeOllamaCloud: Plugin = async (_input, options) => {
         try {
           const catalog = await loadCatalog(opts)
           if (catalog) {
-            const models = toModels(catalog)
+            const models = toModels(catalog, pricing)
             if (Object.keys(models).length > 0) return models
           }
           console.warn("[opencode-ollama-cloud] no usable catalog, falling back to models.dev models")
@@ -115,7 +121,14 @@ const opencodeOllamaCloud: Plugin = async (_input, options) => {
             err,
           )
         }
-        return provider.models
+        // Passthrough: models.dev's ollama-cloud entries carry no cost today,
+        // but the reference contract holds regardless — a model without OUR
+        // catalog's pricing never shows a cost, even if models.dev attaches
+        // one later (cost here means the reference rate, not their number).
+        const models: Record<string, ModelV2> = {}
+        for (const [id, model] of Object.entries(provider.models))
+          models[id] = { ...model, cost: { input: 0, output: 0, cache: { read: 0, write: 0 } } }
+        return models
       },
     },
   }

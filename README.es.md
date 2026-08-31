@@ -82,13 +82,23 @@ catalog.json (jsDelivr, purgado tras cada commit / raw.githubusercontent / cache
 
 - `catalogUrl`: URL alternativa del catálogo (se intenta primero).
 - `timeoutMs`: timeout de cada fetch (default `5000`).
+- `pricing`: `"off"` (default) o `"reference"` — si el contador de costos de opencode muestra los precios de referencia del catálogo.
+
+```json
+{
+  "plugin": [["@srnoob2570/opencode-ollama-cloud", { "pricing": "reference" }]]
+}
+```
+
+El catálogo trae un **precio de referencia** por modelo — la tarifa de la API upstream en USD por 1M de tokens, construida automáticamente desde las entradas first-party de models.dev y corregible en `catalog/pricing-overrides.json` (los overrides ganan; los desacuerdos con el seed quedan registrados en `conflicts`). Son precios de referencia, **no facturación**: tu plan de ollama.com no cobra por uso, y la tarifa real solo es visible en tu panel de ollama.com. Los modelos sin datos de precio quedan en $0 (sin estimaciones a medias).
 
 ## Desarrollo
 
 ```bash
 bun install
-bun run check      # ¿cambió la lista de modelos? (sin scraping)
-bun run update     # regenera catalog/catalog.json si cambió
+bun run check           # ¿cambió la lista de modelos? (sin scraping)
+bun run update          # regenera catalog/catalog.json si cambió
+bun run update --force  # regenera aunque la lista no cambie (enriquecimiento nuevo)
 bun run typecheck
 ```
 

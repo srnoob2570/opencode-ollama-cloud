@@ -247,3 +247,79 @@ describe("isCatalog", () => {
     expect(isCatalog({ ...validCatalog, models: [{ id: 42 }] })).toBe(false)
   })
 })
+
+// Optional pricing/provenance blocks: catalogs without them (old versions)
+// stay valid; catalogs with them must carry the right shape so garbage
+// prices never reach the plugin's cost mapping.
+describe("isCatalog optional pricing blocks", () => {
+  const validModel = {
+    id: "glm-5.3-flash",
+    name: "GLM 5.3 Flash",
+    created: 1787929200,
+    family: "glm",
+    capabilities: { tools: true, thinking: true, vision: false },
+    input: ["text"],
+    context: 1024 * 1024,
+    maxOutput: 131072,
+    reasoningOptions: [],
+    releaseDate: "2026-08-30",
+  }
+  const catalog = (model: Record<string, unknown>) => ({
+    provider: { id: "ollama-cloud", name: "Ollama Cloud", api: "https://ollama.com/v1", npm: "@ai-sdk/openai-compatible", env: ["OLLAMA_API_KEY"] },
+    generatedAt: "2026-08-30T00:00:00.000Z",
+    modelsHash: "a".repeat(64),
+    models: [model],
+  })
+
+  test("absent blocks pass (old catalogs load unchanged)", () => {
+    expect(isCatalog(catalog(validModel) as unknown)).toBe(true)
+  })
+
+  test("well-shaped pricing passes", () => {
+    const withPricing = {
+      ...validModel,
+      pricing: { input: 0.075, output: 0.25, unit: "per-1M", provider: "zai", source: "https://x", asOf: "2026-08-30" },
+    }
+    expect(isCatalog(catalog(withPricing) as unknown)).toBe(true)
+  })
+
+  test("garbage pricing is rejected (wrong unit, non-numeric costs)", () => {
+    const badUnit = { ...validModel, pricing: { ...validModel, input: 1, output: 1, unit: "per-token" } }
+    const badNumbers = { ...validModel, pricing: { input: "0.075", output: 0.25, unit: "per-1M", provider: "zai", source: "https://x", asOf: "2026-08-30" } }
+    expect(isCatalog(catalog(badUnit) as unknown)).toBe(false)
+    expect(isCatalog(catalog(badNumbers) as unknown)).toBe(false)
+  })
+})
+
+describe("isCatalog pricing compat (code review fixes)", () => {
+  const validModel = {
+    id: "kimi-k3",
+    name: "Kimi K3",
+    created: 0,
+    family: "kimi-k3",
+    capabilities: { tools: true, thinking: true, vision: false },
+    input: ["text"],
+    context: 1024 * 1024,
+    maxOutput: 131072,
+    reasoningOptions: [],
+    releaseDate: "2026-08-30",
+  }
+  const wrap = (model: Record<string, unknown>) => ({
+    provider: { id: "ollama-cloud", name: "Ollama Cloud", api: "https://ollama.com/v1", npm: "@ai-sdk/openai-compatible", env: ["OLLAMA_API_KEY"] },
+    generatedAt: "2026-08-30T00:00:00.000Z",
+    modelsHash: "b".repeat(64),
+    models: [model],
+  })
+
+  test("a foreign catalog with models.dev-shaped pricing ({input, output}) still loads", () => {
+    expect(
+      isCatalog(wrap({ ...validModel, pricing: { input: 0.2, output: 0.7 } }) as unknown),
+    ).toBe(true)
+  })
+
+  test("negative, NaN and Infinity prices are rejected", () => {
+    const bad = [{ input: -5, output: 2 }, { input: Number.NaN, output: 2 }, { input: 1e999, output: 2 }]
+    for (const pricing of bad)
+      expect(isCatalog(wrap({ ...validModel, pricing }) as unknown)).toBe(false)
+  })
+})

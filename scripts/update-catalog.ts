@@ -1,15 +1,31 @@
 import { createHash } from "node:crypto"
+import { rename } from "node:fs/promises"
 import {
   PROVIDER_CONFIG,
   type Catalog as BaseCatalog,
   type CatalogModel,
 } from "../plugin/catalog.ts"
+import { resolveCatalog, type PricingOverrides } from "./resolve-catalog.ts"
 
 const MODELS_API = "https://ollama.com/v1/models"
 const LIBRARY_URL = (base: string) => `https://ollama.com/library/${base}`
 const MODEL_SEED_URL = "https://models.dev/api.json"
 
 const CATALOG_PATH = new URL("../catalog/catalog.json", import.meta.url).pathname
+const OVERRIDES_PATH = new URL("../catalog/pricing-overrides.json", import.meta.url).pathname
+
+// Reference-price overrides (catalog/pricing-overrides.json) are manual
+// corrections. Absent file = trust the seed entirely; a PRESENT file that
+// fails to parse aborts loudly — silently dropping manual corrections would
+// publish stale prices as if they were fresh.
+async function loadOverrides(): Promise<PricingOverrides> {
+  const file = Bun.file(OVERRIDES_PATH)
+  if (!(await file.exists())) return {}
+  const raw = await file.json()
+  if (!raw || typeof raw !== "object" || Array.isArray(raw))
+    throw new Error("pricing-overrides.json must be an object keyed by model id")
+  return raw as PricingOverrides
+}
 
 type OllamaModel = { id: string; created: number }
 
@@ -176,12 +192,22 @@ function buildEmptyCatalog(): Catalog {
 
 async function loadCatalog(): Promise<Catalog> {
   const file = Bun.file(CATALOG_PATH)
-  if (await file.exists()) return (await file.json()) as Catalog
+  // A torn write must not wedge the updater — the crash would destroy its own
+  // repair path on every subsequent run. Treat an unparsable catalog like a
+  // missing one and rebuild.
+  try {
+    if (await file.exists()) return (await file.json()) as Catalog
+  } catch {
+    console.warn("warning: catalog/catalog.json is unparsable; regenerating from scratch")
+  }
   return buildEmptyCatalog()
 }
 
 async function main() {
   const mode = process.argv[2] === "check" ? "check" : "update"
+  // --force regenerates even when /v1/models is unchanged: used after changing
+  // enrichment (e.g. adding pricing) so the hash gate doesn't hide the new data.
+  const force = process.argv.includes("--force")
 
   const api = await fetchJson<{ data: OllamaModel[] }>(MODELS_API)
   const live = api.data
@@ -200,10 +226,13 @@ async function main() {
   }
 
   // Re-scrape weekly even when the /v1/models hash is unchanged, so enrichment
-  // data (context windows, capabilities, seed info) for existing models gets refreshed.
+  // data (context windows, capabilities, seed info, pricing) for existing
+  // models gets refreshed. --force does the same on demand.
   const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
   const stale =
-    !catalog.generatedAt || Date.now() - Date.parse(catalog.generatedAt) > STALE_AFTER_MS
+    force ||
+    !catalog.generatedAt ||
+    Date.now() - Date.parse(catalog.generatedAt) > STALE_AFTER_MS
 
   if (catalog.modelsHash === liveHash && !stale) {
     console.log("catalog already up to date")
@@ -212,6 +241,13 @@ async function main() {
   if (stale) console.log("catalog stale; forcing refresh")
 
   const seed = await fetchJson<Record<string, any>>(MODEL_SEED_URL).catch(() => ({}))
+  // The seed carries maxOutput, reasoningOptions, releaseDate and the
+  // first-party pricing rule. An empty seed (transient models.dev outage)
+  // would publish a silently regressed catalog — context windows stay but
+  // maxOutput falls back to 32768 and prices evaporate. Same policy as a
+  // failed library scrape: abort loudly and let the next scheduled run retry.
+  if (!Object.keys(seed).length)
+    throw new Error("models.dev seed is empty — aborting instead of publishing a regressed catalog")
 
   const byBase = new Map<string, OllamaModel[]>()
   for (const m of live) {
@@ -291,6 +327,13 @@ async function main() {
 
   const merged = mergeSeed(models, seed)
 
+  const resolved = resolveCatalog(merged, {
+    seed,
+    overrides: await loadOverrides(),
+    today: new Date().toISOString().slice(0, 10),
+  })
+  for (const w of resolved.warnings) console.warn(`warning: ${w}`)
+
   const next: Catalog = {
     ...catalog,
     generatedAt: new Date().toISOString(),
@@ -299,11 +342,14 @@ async function main() {
     // timestamp (gpt-oss:120b/:20b); the id tiebreak keeps regenerations of an
     // unchanged model list from producing a reordered — and thus "changed" —
     // catalog.
-    models: merged.sort((a, b) => b.created - a.created || a.id.localeCompare(b.id)),
+    models: resolved.models.sort((a, b) => b.created - a.created || a.id.localeCompare(b.id)),
   }
 
-  await Bun.write(CATALOG_PATH, JSON.stringify(next, null, 2) + "\n")
-  console.log(`catalog updated: ${merged.length} models, ${byBase.size} bases scraped`)
+  // Atomic: a torn write must never leave a half-catalog that wedges every
+  // subsequent `update` and `check` run.
+  await Bun.write(CATALOG_PATH + ".tmp", JSON.stringify(next, null, 2) + "\n")
+  await rename(CATALOG_PATH + ".tmp", CATALOG_PATH)
+  console.log(`catalog updated: ${resolved.models.length} models, ${byBase.size} bases scraped, ${resolved.warnings.length} pricing warnings`)
 }
 
 // Guarded so tests and the validator can import pure functions (parseLibraryPage,

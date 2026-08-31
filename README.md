@@ -82,13 +82,23 @@ Prefer editing the config yourself? Add the plugin to `~/.config/opencode/openco
 
 - `catalogUrl`: alternative catalog URL (tried first).
 - `timeoutMs`: per-fetch timeout (default `5000`).
+- `pricing`: `"off"` (default) or `"reference"` — whether opencode's session cost counter shows the catalog's reference prices.
+
+```json
+{
+  "plugin": [["@srnoob2570/opencode-ollama-cloud", { "pricing": "reference" }]]
+}
+```
+
+The catalog ships a **reference price** per model — the upstream API rate in USD per 1M tokens, built automatically from models.dev first-party entries and correctable in `catalog/pricing-overrides.json` (overrides win; disagreements with the seed are recorded in the catalog's `conflicts`). These are reference prices, **not billing**: your ollama.com plan doesn't charge per use, and the real token rate is only visible in your ollama.com panel. Models without pricing data stay at $0 (no partial estimates).
 
 ## Development
 
 ```bash
 bun install
-bun run check      # did the model list change? (no scraping)
-bun run update     # regenerate catalog/catalog.json if it changed
+bun run check           # did the model list change? (no scraping)
+bun run update          # regenerate catalog/catalog.json if it changed
+bun run update --force  # regenerate even when the list is unchanged (new enrichment)
 bun run typecheck
 ```
 

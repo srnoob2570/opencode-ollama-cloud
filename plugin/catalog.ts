@@ -24,6 +24,23 @@ export interface CatalogModel {
   maxOutput: number
   reasoningOptions: string[]
   releaseDate: string
+  /** Reference price of the upstream API (USD per 1M tokens) — not billing. */
+  pricing?: ModelPricing
+  /** Per-field provenance: which source provided each value. */
+  sources?: Record<string, string>
+  /** Recorded disagreements between sources, with the resolver applied. */
+  conflicts?: Record<string, Record<string, unknown>>
+}
+
+export interface ModelPricing {
+  input: number
+  output: number
+  /** Our updater always sets "per-1M"; foreign catalogs may omit it. */
+  unit?: "per-1M"
+  provider?: string
+  source?: string
+  asOf?: string
+  note?: string
 }
 
 export interface Catalog {
@@ -42,6 +59,8 @@ export interface Catalog {
 export interface PluginOpts {
   catalogUrl?: string
   timeoutMs?: number
+  /** Whether opencode's session cost counter shows the catalog's reference prices. */
+  pricing?: "off" | "reference"
 }
 
 const DEFAULT_URLS = [
@@ -80,7 +99,20 @@ export function isCatalog(value: unknown): value is Catalog {
         Array.isArray(m?.input) &&
         Array.isArray(m?.reasoningOptions) &&
         // consumed downstream as ModelV2.release_date, a required string
-        typeof m?.releaseDate === "string",
+        typeof m?.releaseDate === "string" &&
+        // optional blocks: absent → always valid; present → the plugin costs
+        // only read input/output, so the loader requires those (finite,
+        // positive) plus a valid unit if one is set — a minimal models.dev-
+        // shaped {input, output} pricing from a custom catalogUrl keeps
+        // loading. The published schema (catalog.schema.json) is stricter.
+        (!m.pricing ||
+          (Number.isFinite(m.pricing.input) &&
+            m.pricing.input > 0 &&
+            Number.isFinite(m.pricing.output) &&
+            m.pricing.output > 0 &&
+            (m.pricing.unit === undefined || m.pricing.unit === "per-1M"))) &&
+        (m.sources === undefined || typeof m.sources === "object") &&
+        (m.conflicts === undefined || typeof m.conflicts === "object"),
     )
   )
 }
