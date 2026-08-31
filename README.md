@@ -92,6 +92,10 @@ bun run update     # regenerate catalog/catalog.json if it changed
 bun run typecheck
 ```
 
+## Changelog
+
+Every version gets an entry in [CHANGELOG.md](CHANGELOG.md) and its own [GitHub release](https://github.com/srnoob2570/opencode-ollama-cloud/releases). Release branches live under `release/v*`.
+
 ## License
 
 MIT
