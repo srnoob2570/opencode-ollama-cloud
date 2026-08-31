@@ -5,9 +5,21 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-31
+
+### Added
+
+- Reference prices (opt-in): the catalog ships an upstream-API reference price per model. Pricing resolves automatically from models.dev first-party entries, with manual corrections in `catalog/pricing-overrides.json` (overrides win; override-vs-seed disagreements are recorded in the catalog's `conflicts`).
+- `pricing: "reference"` plugin option: opencode's session cost counter shows the reference rate. Default `off` — and models without pricing data stay at $0 (no partial estimates).
+
+### Fixed
+
+- Updater hardening: transient models.dev outages abort loudly instead of publishing a regressed catalog; catalog writes are atomic and self-heal from torn files; malformed overrides are ignored with a warning; marketplace price ties now resolve deterministically; override `asOf` keeps the date the value was taken.
+
 ### Docs
 
 - Recommend `--force --global` for the install command, since opencode has no update command.
+- Reference-pricing disclosure and the `pricing` option documented in both READMEs, plus `update --force`.
 
 ## [0.1.2] - 2026-08-28
 
@@ -49,7 +61,8 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 - README in English and Spanish.
 - CI refreshes the catalog on a schedule and verifies the catalog before publishing.
 
-[Unreleased]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/srnoob2570/opencode-ollama-cloud/releases/tag/v0.1.0
