@@ -97,7 +97,7 @@ Prefer editing the config yourself? Add the plugin to `~/.config/opencode/openco
 
 The catalog ships the **official Ollama Cloud rate** per model — input, cached-input and output prices in USD per 1M tokens, straight from Ollama's public [rate card](https://ollama.com/pricing) in `catalog/pricing.json`. This is what your credits actually pay per token, so opencode's cost counter shows it by default (opt-out: `pricing: "off"` turns it off). Models without a rate stay at $0 (no partial estimates).
 
-Refreshing the table is a **manual workflow**: run `bun run update-pricing` and it fetches the live rate card, prints a rate-by-rate diff and rewrites `catalog/pricing.json`. If the page and the catalog disagree (a new or retired model), it aborts with a report and writes nothing. The automated catalog update never touches pricing.
+Refreshing the table is a **manual GitHub Actions workflow** (`.github/workflows/update-pricing.yml`): trigger `update-pricing` from the Actions tab (or `gh workflow run update-pricing`) and it fetches the live rate card, prints a rate-by-rate diff in the run log, rewrites `catalog/pricing.json` and commits the change, purging the jsDelivr cache so users get the new rates. If the page and the catalog disagree (a new or retired model), it aborts with a report and writes nothing. Nothing runs on a schedule — the rates change only when you trigger the run. The same script works from your machine (`bun run update-pricing`); the automated catalog update never touches pricing either way.
 
 ## Streaming stats and the model card
 

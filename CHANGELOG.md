@@ -5,6 +5,10 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 
 ## [Unreleased]
 
+### Added
+
+- `update-pricing` GitHub Actions workflow. Refreshing the rate card is now a manual run from the Actions tab (or `gh workflow run update-pricing`): the workflow fetches Ollama's live pricing page, prints every rate that changed, commits the refreshed `catalog/pricing.json` and purges the jsDelivr cache. It never runs on a schedule, and the local `bun run update-pricing` still works the same way.
+
 ## [0.1.6] - 2026-09-01
 
 ### Added

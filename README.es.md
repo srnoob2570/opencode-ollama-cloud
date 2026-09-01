@@ -97,7 +97,7 @@ catalog.json (jsDelivr, purgado tras cada commit / raw.githubusercontent / cache
 
 El catálogo trae la **tarifa oficial de Ollama Cloud** por modelo — precios de input, cached input y output en USD por 1M de tokens, directamente de la [rate card](https://ollama.com/pricing) pública de Ollama en `catalog/pricing.json`. Es lo que tus créditos pagan de verdad por token, así que el contador de costos de opencode la muestra por defecto (opt-out: `pricing: "off"` la apaga). Los modelos sin tarifa quedan en $0 (sin estimaciones a medias).
 
-Actualizar la tabla es un **workflow manual**: corrés `bun run update-pricing` y fetcha la rate card viva, imprime un diff tarifa-por-tarifa y reescribe `catalog/pricing.json`. Si la página y el catálogo no cuadran (un modelo nuevo o retirado), aborta con un reporte y no escribe nada. El update automático del catálogo jamás toca el pricing.
+Actualizar la tabla es un **workflow manual de GitHub Actions** (`.github/workflows/update-pricing.yml`): disparás `update-pricing` desde la pestaña Actions (o `gh workflow run update-pricing`) y fetcha la rate card viva, imprime un diff tarifa-por-tarifa en el log del run, reescribe `catalog/pricing.json` y commitea el cambio, purgando la caché de jsDelivr para que los usuarios reciban las tarifas nuevas. Si la página y el catálogo no cuadran (un modelo nuevo o retirado), aborta con un reporte y no escribe nada. No hay ningún schedule — las tarifas cambian solo cuando vos disparás el run. El mismo script funciona desde tu máquina (`bun run update-pricing`); el update automático del catálogo jamás toca el pricing de ninguna de las dos formas.
 
 ## Estadísticas de streaming y ficha de modelo
 
