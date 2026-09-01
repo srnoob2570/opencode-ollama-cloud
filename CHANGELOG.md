@@ -5,6 +5,13 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-09-01
+
+### Fixed
+
+- The `/stats` and `/model` dialogs render in English now. They shipped with Spanish labels (Sesión, Cuantización, "hace 1m") against an otherwise English TUI; every presented string matches the core UI language. The live line was already English and is unchanged.
+- The catalog's provenance strings are English too, and two rows keep their real source on every refresh: glm-5.2 and nemotron-3-ultra have always had an empty registry blob, so their researched implicit provenance (the checkpoint, the library README) no longer degrades to "previous run" with each catalog update.
+
 ## [0.1.4] - 2026-09-01
 
 ### Added
@@ -82,7 +89,8 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 - README in English and Spanish.
 - CI refreshes the catalog on a schedule and verifies the catalog before publishing.
 
-[Unreleased]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.1...v0.1.2
