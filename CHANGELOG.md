@@ -5,6 +5,8 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-09-01
+
 ### Changed
 
 - Pricing is now the **official Ollama Cloud rate** and it is **on by default**. Ollama publishes a public [rate card](https://ollama.com/pricing) with input, cached-input and output prices per million tokens — what your credits actually pay — and the plugin's cost counter and `/model` card show it without any configuration. `pricing: "off"` turns it off; the old opt-in value `pricing: "reference"` still works and means "on". This replaces the old upstream "reference price" built from models.dev with manual overrides: that estimate existed because Ollama published no rates, and `catalog/pricing-overrides.json` is gone.
@@ -94,7 +96,8 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 - README in English and Spanish.
 - CI refreshes the catalog on a schedule and verifies the catalog before publishing.
 
-[Unreleased]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.2...v0.1.3
