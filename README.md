@@ -118,7 +118,7 @@ The average only counts the **main conversation**: subagents, title generation a
 
 ### Quantization disclosure
 
-The model card's **quantization** is the value Ollama **declares** for the model it serves (registry `file_type`, cross-checked against `/api/show`), researched per model and carried in the catalog — it does **not** guarantee the precision the remote inference actually runs at. Models without a defensible public source say `desconocida` (they are never guessed), and models outside the catalog show `—`.
+The model card's **quantization** is the value Ollama **declares** for the model it serves (registry `file_type`, cross-checked against `/api/show`), researched per model and carried in the catalog — it does **not** guarantee the precision the remote inference actually runs at. Models without a defensible public source say `unknown` (never guessed), and models outside the catalog show `—`.
 
 Credit where it's due: the streaming-stats idea was proposed by GitHub user **[@adilfaisal01](https://github.com/adilfaisal01)**.
 

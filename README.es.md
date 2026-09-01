@@ -138,7 +138,7 @@ La **cuantización** de la ficha es el valor que Ollama **declara** para el
 modelo que sirve (`file_type` del registry, contrastado con `/api/show`),
 investigado por modelo y transportado en el catálogo — **no** garantiza la
 precisión a la que corre realmente la inferencia remota. Los modelos sin
-fuente pública defendible muestran `desconocida` (nunca se inventan), y los
+fuente pública defendible muestran `unknown` (nunca se inventan), y los
 modelos fuera del catálogo muestran `—`.
 
 Crédito del origen de la idea: el usuario de GitHub

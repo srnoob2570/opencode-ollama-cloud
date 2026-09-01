@@ -9,21 +9,22 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 
 ### Added
 
-- **Streaming stats (opt-out), idea by [@adilfaisal01](https://github.com/adilfaisal01)**: the plugin measures TTFT and tokens/s per LLM step client-side — wire-accurate for `ollama-cloud` (wrapped provider `fetch` + final `usage` chunk), event-derived for any other provider — and shows a live session average (`38.2 tok/s · TTFT 380 ms · Session average`) next to the token counter. The average belongs to the session, not the model: no per-model breakdown, no reset when switching models, main thread only (subagents, titlegen and compaction excluded by verified signals), in-memory per session. Requires the second plugin entry `"@srnoob2570/opencode-ollama-cloud/tui"`; the TUI plugin API it uses is present but undocumented in opencode 1.18.25, so the stats UI degrades silently when the API moves. `stats: "off"` on both entries reduces the plugin to its exact previous behavior.
-- `/stats` and `/model` TUI dialogs: session summary + latest responses, and the model card (quantization, family, capabilities, limits, release, reference price when `pricing: "reference"`).
-- **Quantization in the catalog and the model card**: the updater extracts the raw value Ollama declares (registry config blob `file_type` via `<ref>-cloud` manifests, cross-checked against `POST /api/show`; disagreements recorded in `conflicts`, CI advises). Coverage: 15/19 from the registry, `glm-5.2` → FP8 and `nemotron-3-ultra` → NVFP4 carried as researched implicit values with provenance, `minimax-m3`/`minimax-m2.7` literal `unknown`. Optional, shape-only, no closed enum — new Ollama formats cannot break the updater. Disclosure: **declared, not guaranteed** (the remote inference precision is not documented by Ollama).
+- Streaming stats, opt-out. The plugin measures TTFT and tokens per second for every LLM step, on your machine. For ollama-cloud it wraps the provider fetch and reads the final usage chunk, so the timing is wire-accurate; for every other provider it estimates from opencode's own events. The line next to the token counter shows the session average, like `38.2 tok/s · TTFT 380 ms · Session average`. Three things to know. It counts only your main conversation, so subagents, title generation and compaction stay out. The average belongs to the session rather than the model. Nothing is stored and nothing leaves your machine. Idea by [@adilfaisal01](https://github.com/adilfaisal01).
+- Setup. The stats UI ships as a second plugin entry, `"opencode-ollama-cloud/tui"`. The API it uses exists in opencode 1.18.25 but isn't documented, so treat the UI as best effort; if a future opencode moves that API, the stats simply disappear and the rest of the plugin keeps working. `stats: "off"` on both entries leaves the plugin exactly as before.
+- Two dialogs. `/stats` opens the session summary plus the last responses, and you can tell wire measurements apart from the event estimates. `/model` opens the active model's card: quantization, family, capabilities, limits, release date, and the reference price when `pricing: "reference"` is set.
+- Quantization. The updater now extracts the value Ollama declares for each model, read from the registry config blob and cross-checked against `/api/show`. Fifteen of the nineteen models come straight from the registry. `glm-5.2` and `nemotron-3-ultra` carry values researched from public sources, with the source noted. `minimax-m3` and `minimax-m2.7` stay `unknown` because the public signals contradict each other or are simply absent. Treat it as declared, not guaranteed. Ollama doesn't document the precision the remote inference actually runs at. The field is optional and has no closed enum, so a new Ollama format can't break the updater.
 
 ### Removed
 
-- **Type-level breaking**: the unused `pricing` field was dropped from the exported `PluginOpts` type. The user-facing `pricing` plugin option (`"off" | "reference"` in the opencode config) is unchanged — only code constructing the internal `PluginOpts` type with a `pricing` property will fail typecheck on upgrade. Runtime behavior is identical.
+- Type-level break. The unused `pricing` field is gone from the exported `PluginOpts` type. The `pricing` option in your opencode config is unchanged and works the same as before. Only code that sets `pricing` on the internal `PluginOpts` type will fail typecheck.
 
 ### Changed
 
-- Internal simplification pass: shared test fixtures, unified `family` vocabulary, single models.dev seed URL, strict updater CLI (`[check|update] [--force]`, unknown arguments now exit 1 instead of running an update).
+- Internal cleanup. Test fixtures are shared, `family` is now the single vocabulary for model bases, the models.dev seed URL lives in one place, and the updater CLI rejects unknown arguments instead of running a full update on typos.
 
 ### CI
 
-- Catalog validation now checks the published JSON schema too (`ajv` + `ajv-formats`), not only the hand-mirrored `isCatalog` — the two contracts can no longer drift apart silently.
+- `catalog.json` now validates against the published JSON schema, alongside the hand-mirrored checks, so the two contracts can't drift apart.
 
 ## [0.1.3] - 2026-08-31
 
