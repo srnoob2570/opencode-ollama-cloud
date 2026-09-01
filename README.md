@@ -76,7 +76,12 @@ Prefer editing the config yourself? Add the plugin to `~/.config/opencode/openco
 
 ```json
 {
-  "plugin": [["@srnoob2570/opencode-ollama-cloud", { "catalogUrl": "https://my-cdn/catalog.json" }]]
+  "plugin": [
+    [
+      "@srnoob2570/opencode-ollama-cloud",
+      { "catalogUrl": "https://my-cdn/catalog.json" }
+    ]
+  ]
 }
 ```
 

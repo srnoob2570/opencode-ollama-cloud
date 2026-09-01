@@ -5,9 +5,7 @@
     "name": "Ollama Cloud",
     "api": "https://ollama.com/v1",
     "npm": "@ai-sdk/openai-compatible",
-    "env": [
-      "OLLAMA_API_KEY"
-    ]
+    "env": ["OLLAMA_API_KEY"]
   },
   "generatedAt": "2026-09-01T04:55:01.525Z",
   "modelsHash": "e06ea128b326f65bf969a63418eba2277f53ca5e4b266ee92d049054d45609a4",
@@ -22,16 +20,10 @@
         "thinking": true,
         "vision": false
       },
-      "input": [
-        "text"
-      ],
+      "input": ["text"],
       "context": 1048576,
       "maxOutput": 131072,
-      "reasoningOptions": [
-        "low",
-        "high",
-        "max"
-      ],
+      "reasoningOptions": ["low", "high", "max"],
       "releaseDate": "2026-08-14",
       "pricing": {
         "input": 1.4,
@@ -57,17 +49,10 @@
         "thinking": true,
         "vision": true
       },
-      "input": [
-        "text",
-        "image"
-      ],
+      "input": ["text", "image"],
       "context": 1048576,
       "maxOutput": 131072,
-      "reasoningOptions": [
-        "low",
-        "high",
-        "max"
-      ],
+      "reasoningOptions": ["low", "high", "max"],
       "releaseDate": "2026-08-26",
       "pricing": {
         "input": 0.15,
@@ -103,15 +88,10 @@
         "thinking": true,
         "vision": false
       },
-      "input": [
-        "text"
-      ],
+      "input": ["text"],
       "context": 1048576,
       "maxOutput": 1048576,
-      "reasoningOptions": [
-        "high",
-        "max"
-      ],
+      "reasoningOptions": ["high", "max"],
       "releaseDate": "2026-04-24",
       "pricing": {
         "input": 1.32,
@@ -147,15 +127,10 @@
         "thinking": true,
         "vision": false
       },
-      "input": [
-        "text"
-      ],
+      "input": ["text"],
       "context": 1048576,
       "maxOutput": 1048576,
-      "reasoningOptions": [
-        "high",
-        "max"
-      ],
+      "reasoningOptions": ["high", "max"],
       "releaseDate": "2026-07-31",
       "pricing": {
         "input": 0.44,
@@ -191,17 +166,10 @@
         "thinking": true,
         "vision": true
       },
-      "input": [
-        "text",
-        "image"
-      ],
+      "input": ["text", "image"],
       "context": 1048576,
       "maxOutput": 131072,
-      "reasoningOptions": [
-        "low",
-        "high",
-        "max"
-      ],
+      "reasoningOptions": ["low", "high", "max"],
       "releaseDate": "2026-07-16",
       "pricing": {
         "input": 3,
@@ -227,15 +195,10 @@
         "thinking": true,
         "vision": false
       },
-      "input": [
-        "text"
-      ],
+      "input": ["text"],
       "context": 999424,
       "maxOutput": 131072,
-      "reasoningOptions": [
-        "high",
-        "max"
-      ],
+      "reasoningOptions": ["high", "max"],
       "releaseDate": "2026-06-13",
       "pricing": {
         "input": 1.4,
@@ -261,10 +224,7 @@
         "thinking": true,
         "vision": true
       },
-      "input": [
-        "text",
-        "image"
-      ],
+      "input": ["text", "image"],
       "context": 262144,
       "maxOutput": 262144,
       "reasoningOptions": [],
@@ -293,9 +253,7 @@
         "thinking": true,
         "vision": false
       },
-      "input": [
-        "text"
-      ],
+      "input": ["text"],
       "context": 262144,
       "maxOutput": 128000,
       "reasoningOptions": [],
@@ -324,18 +282,10 @@
         "thinking": true,
         "vision": true
       },
-      "input": [
-        "text",
-        "image"
-      ],
+      "input": ["text", "image"],
       "context": 524288,
       "maxOutput": 131072,
-      "reasoningOptions": [
-        "low",
-        "medium",
-        "high",
-        "max"
-      ],
+      "reasoningOptions": ["low", "medium", "high", "max"],
       "releaseDate": "2026-05-31",
       "pricing": {
         "input": 0.3,
@@ -361,10 +311,7 @@
         "thinking": true,
         "vision": true
       },
-      "input": [
-        "text",
-        "image"
-      ],
+      "input": ["text", "image"],
       "context": 262144,
       "maxOutput": 262144,
       "reasoningOptions": [],
@@ -393,9 +340,7 @@
         "thinking": true,
         "vision": false
       },
-      "input": [
-        "text"
-      ],
+      "input": ["text"],
       "context": 202752,
       "maxOutput": 131072,
       "reasoningOptions": [],
@@ -424,10 +369,7 @@
         "thinking": true,
         "vision": true
       },
-      "input": [
-        "text",
-        "image"
-      ],
+      "input": ["text", "image"],
       "context": 262144,
       "maxOutput": 262144,
       "reasoningOptions": [],
@@ -457,9 +399,7 @@
         "thinking": true,
         "vision": false
       },
-      "input": [
-        "text"
-      ],
+      "input": ["text"],
       "context": 204800,
       "maxOutput": 196608,
       "reasoningOptions": [],
@@ -488,9 +428,7 @@
         "thinking": true,
         "vision": false
       },
-      "input": [
-        "text"
-      ],
+      "input": ["text"],
       "context": 262144,
       "maxOutput": 65536,
       "reasoningOptions": [],
@@ -519,10 +457,7 @@
         "thinking": true,
         "vision": true
       },
-      "input": [
-        "text",
-        "image"
-      ],
+      "input": ["text", "image"],
       "context": 262144,
       "maxOutput": 65536,
       "reasoningOptions": [],
@@ -551,9 +486,7 @@
         "thinking": true,
         "vision": false
       },
-      "input": [
-        "text"
-      ],
+      "input": ["text"],
       "context": 1048576,
       "maxOutput": 131072,
       "reasoningOptions": [],
@@ -583,10 +516,7 @@
         "thinking": false,
         "vision": true
       },
-      "input": [
-        "text",
-        "image"
-      ],
+      "input": ["text", "image"],
       "context": 262144,
       "maxOutput": 262144,
       "reasoningOptions": [],
@@ -615,16 +545,10 @@
         "thinking": true,
         "vision": false
       },
-      "input": [
-        "text"
-      ],
+      "input": ["text"],
       "context": 131072,
       "maxOutput": 32768,
-      "reasoningOptions": [
-        "low",
-        "medium",
-        "high"
-      ],
+      "reasoningOptions": ["low", "medium", "high"],
       "releaseDate": "2025-08-05",
       "pricing": {
         "input": 0.15,
@@ -651,16 +575,10 @@
         "thinking": true,
         "vision": false
       },
-      "input": [
-        "text"
-      ],
+      "input": ["text"],
       "context": 131072,
       "maxOutput": 32768,
-      "reasoningOptions": [
-        "low",
-        "medium",
-        "high"
-      ],
+      "reasoningOptions": ["low", "medium", "high"],
       "releaseDate": "2025-08-05",
       "pricing": {
         "input": 0.05,

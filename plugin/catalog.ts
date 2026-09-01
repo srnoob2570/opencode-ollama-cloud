@@ -1,8 +1,8 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
-import { join } from "node:path"
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
-export const PROVIDER_ID = "ollama-cloud"
+export const PROVIDER_ID = "ollama-cloud";
 
 /** Single source of truth for the provider identity (kept in sync with catalog.schema.json). */
 export const PROVIDER_CONFIG: Catalog["provider"] = {
@@ -11,72 +11,72 @@ export const PROVIDER_CONFIG: Catalog["provider"] = {
   api: "https://ollama.com/v1",
   npm: "@ai-sdk/openai-compatible",
   env: ["OLLAMA_API_KEY"],
-}
+};
 
 export interface CatalogModel {
-  id: string
-  name: string
-  created: number
-  family: string
-  capabilities: { tools: boolean; thinking: boolean; vision: boolean }
-  input: string[]
-  context: number
-  maxOutput: number
-  reasoningOptions: string[]
-  releaseDate: string
+  id: string;
+  name: string;
+  created: number;
+  family: string;
+  capabilities: { tools: boolean; thinking: boolean; vision: boolean };
+  input: string[];
+  context: number;
+  maxOutput: number;
+  reasoningOptions: string[];
+  releaseDate: string;
   /** Raw quantization Ollama declares for the served model (registry file_type
    * + /api/show quantization_level) — or the literal "unknown". DECLARATIVE
    * metadata, never a guarantee of remote inference precision. No closed enum:
    * a new Ollama format must not block the updater. */
-  quantization?: string
+  quantization?: string;
   /** Reference price of the upstream API (USD per 1M tokens) — not billing. */
-  pricing?: ModelPricing
+  pricing?: ModelPricing;
   /** Per-field provenance: which source provided each value. */
-  sources?: Record<string, string>
+  sources?: Record<string, string>;
   /** Recorded disagreements between sources, with the resolver applied. */
-  conflicts?: Record<string, Record<string, unknown>>
+  conflicts?: Record<string, Record<string, unknown>>;
 }
 
 export interface ModelPricing {
-  input: number
-  output: number
+  input: number;
+  output: number;
   /** Our updater always sets "per-1M"; foreign catalogs may omit it. */
-  unit?: "per-1M"
-  provider?: string
-  source?: string
-  asOf?: string
-  note?: string
+  unit?: "per-1M";
+  provider?: string;
+  source?: string;
+  asOf?: string;
+  note?: string;
 }
 
 export interface Catalog {
   provider: {
-    id: string
-    name: string
-    api: string
-    npm: string
-    env: string[]
-  }
-  generatedAt: string
-  modelsHash: string
-  models: CatalogModel[]
+    id: string;
+    name: string;
+    api: string;
+    npm: string;
+    env: string[];
+  };
+  generatedAt: string;
+  modelsHash: string;
+  models: CatalogModel[];
 }
 
 export interface PluginOpts {
-  catalogUrl?: string
-  timeoutMs?: number
+  catalogUrl?: string;
+  timeoutMs?: number;
 }
 
 const DEFAULT_URLS = [
   "https://cdn.jsdelivr.net/gh/srnoob2570/opencode-ollama-cloud@main/catalog/catalog.json",
   "https://raw.githubusercontent.com/srnoob2570/opencode-ollama-cloud/main/catalog/catalog.json",
-]
+];
 
-const CACHE_DIR = join(homedir(), ".cache", "opencode-ollama-cloud")
-const CACHE_FILE = join(CACHE_DIR, "catalog.json")
+const CACHE_DIR = join(homedir(), ".cache", "opencode-ollama-cloud");
+const CACHE_FILE = join(CACHE_DIR, "catalog.json");
 
 export function isCatalog(value: unknown): value is Catalog {
-  if (typeof value !== "object" || value === null) return false
-  const c = value as Catalog
+  if (typeof value !== "object" || value === null) return false;
+  const c = value as Catalog;
   return (
     typeof c.provider?.id === "string" &&
     typeof c.provider?.name === "string" &&
@@ -122,55 +122,61 @@ export function isCatalog(value: unknown): value is Catalog {
         // optional quantization: absent (old catalogs) is fine; a present one
         // is shape-only (non-empty string) — never an enum, so a new Ollama
         // format cannot break the loader (CI advises, never fails)
-        (m.quantization === undefined || (typeof m.quantization === "string" && m.quantization.length > 0)),
+        (m.quantization === undefined ||
+          (typeof m.quantization === "string" && m.quantization.length > 0)),
     )
-  )
+  );
 }
 
 // Runtime-side fetch: best-effort (null on any failure) — the plugin must
 // never throw on a down CDN. scripts/update-catalog.ts's fetchJson is
 // intentionally the opposite (fail loud) because CI should block on errors.
-async function fetchCatalogJson(url: string, timeoutMs: number): Promise<unknown | null> {
+async function fetchCatalogJson(
+  url: string,
+  timeoutMs: number,
+): Promise<unknown | null> {
   try {
     const res = await fetch(url, {
       signal: AbortSignal.timeout(timeoutMs),
       headers: { accept: "application/json" },
-    })
-    if (!res.ok) return null
-    return await res.json()
+    });
+    if (!res.ok) return null;
+    return await res.json();
   } catch {
-    return null
+    return null;
   }
 }
 
 async function readCache(): Promise<Catalog | null> {
   try {
-    const raw = await readFile(CACHE_FILE, "utf8")
-    const parsed = JSON.parse(raw)
-    return isCatalog(parsed) ? parsed : null
+    const raw = await readFile(CACHE_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return isCatalog(parsed) ? parsed : null;
   } catch {
-    return null
+    return null;
   }
 }
 
 async function writeCache(catalog: Catalog): Promise<void> {
   try {
-    await mkdir(CACHE_DIR, { recursive: true })
-    await writeFile(CACHE_FILE, JSON.stringify(catalog))
+    await mkdir(CACHE_DIR, { recursive: true });
+    await writeFile(CACHE_FILE, JSON.stringify(catalog));
   } catch {
     /* cache is best-effort */
   }
 }
 
-export async function loadCatalog(opts: PluginOpts = {}): Promise<Catalog | null> {
-  const timeoutMs = opts.timeoutMs ?? 5000
+export async function loadCatalog(
+  opts: PluginOpts = {},
+): Promise<Catalog | null> {
+  const timeoutMs = opts.timeoutMs ?? 5000;
 
   // A user-configured URL keeps documented priority ("tried first") over the defaults.
   if (opts.catalogUrl) {
-    const data = await fetchCatalogJson(opts.catalogUrl, timeoutMs)
+    const data = await fetchCatalogJson(opts.catalogUrl, timeoutMs);
     if (isCatalog(data)) {
-      void writeCache(data)
-      return data
+      void writeCache(data);
+      return data;
     }
   }
 
@@ -179,24 +185,24 @@ export async function loadCatalog(opts: PluginOpts = {}): Promise<Catalog | null
   // falling back to the disk cache. The promise only resolves with a Catalog that
   // already passed isCatalog (or null), so no re-validation is needed after.
   const data = await new Promise<Catalog | null>((resolve) => {
-    let pending = DEFAULT_URLS.length
-    let settled = false
+    let pending = DEFAULT_URLS.length;
+    let settled = false;
     for (const url of DEFAULT_URLS) {
       void fetchCatalogJson(url, timeoutMs).then((d) => {
-        if (settled) return
+        if (settled) return;
         if (isCatalog(d)) {
-          settled = true
-          resolve(d)
+          settled = true;
+          resolve(d);
         } else if (--pending === 0) {
-          resolve(null)
+          resolve(null);
         }
-      })
+      });
     }
-  })
+  });
 
   if (data) {
-    void writeCache(data)
-    return data
+    void writeCache(data);
+    return data;
   }
-  return readCache()
+  return readCache();
 }

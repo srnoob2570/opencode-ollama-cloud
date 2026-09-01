@@ -1,5 +1,5 @@
-import type { Catalog, CatalogModel } from "../plugin/catalog.ts"
-import { familyOf } from "./resolve-catalog.ts"
+import type { Catalog, CatalogModel } from "../plugin/catalog.ts";
+import { familyOf } from "./resolve-catalog.ts";
 
 // Shared test fixtures (SIMPL-013). One factory per side of the catalog
 // contract — a new required CatalogModel field now means one edit, not four.
@@ -7,7 +7,10 @@ import { familyOf } from "./resolve-catalog.ts"
 // so fixtures under plugin/ would ship to npm.
 
 /** Minimal valid model; override per test. */
-export const catalogModel = (id: string, overrides: Partial<CatalogModel> = {}): CatalogModel => ({
+export const catalogModel = (
+  id: string,
+  overrides: Partial<CatalogModel> = {},
+): CatalogModel => ({
   id,
   name: id,
   created: 0,
@@ -19,7 +22,7 @@ export const catalogModel = (id: string, overrides: Partial<CatalogModel> = {}):
   reasoningOptions: [],
   releaseDate: "2026-08-30",
   ...overrides,
-})
+});
 
 export const CATALOG_PROVIDER: Catalog["provider"] = {
   id: "ollama-cloud",
@@ -27,12 +30,15 @@ export const CATALOG_PROVIDER: Catalog["provider"] = {
   api: "https://ollama.com/v1",
   npm: "@ai-sdk/openai-compatible",
   env: ["OLLAMA_API_KEY"],
-}
+};
 
 /** Catalog wrapper taking unknown models so invalid-shape fixtures stay untyped. */
-export const catalogWith = (models: unknown[], modelsHash = "0".repeat(64)) => ({
+export const catalogWith = (
+  models: unknown[],
+  modelsHash = "0".repeat(64),
+) => ({
   provider: CATALOG_PROVIDER,
   generatedAt: "2026-08-30T00:00:00.000Z",
   modelsHash,
   models,
-})
+});

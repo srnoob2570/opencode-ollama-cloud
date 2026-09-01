@@ -62,7 +62,14 @@
           "quantization": { "type": "string", "minLength": 1 },
           "pricing": {
             "type": "object",
-            "required": ["input", "output", "unit", "provider", "source", "asOf"],
+            "required": [
+              "input",
+              "output",
+              "unit",
+              "provider",
+              "source",
+              "asOf"
+            ],
             "properties": {
               "input": { "type": "number", "exclusiveMinimum": 0 },
               "output": { "type": "number", "exclusiveMinimum": 0 },

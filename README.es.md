@@ -76,7 +76,12 @@ catalog.json (jsDelivr, purgado tras cada commit / raw.githubusercontent / cache
 
 ```json
 {
-  "plugin": [["@srnoob2570/opencode-ollama-cloud", { "catalogUrl": "https://mi-cdn/catalog.json" }]]
+  "plugin": [
+    [
+      "@srnoob2570/opencode-ollama-cloud",
+      { "catalogUrl": "https://mi-cdn/catalog.json" }
+    ]
+  ]
 }
 ```
 
