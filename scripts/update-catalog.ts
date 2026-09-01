@@ -455,7 +455,7 @@ async function enrichQuantization(models: CatalogModel[], previous: Catalog): Pr
 
   const warnings: string[] = []
   const enriched = models.map((m, index) => {
-    const q = slots[index] ?? { quantization: QUANT_UNKNOWN, source: "sin fuente defendible" }
+    const q = slots[index] ?? { quantization: QUANT_UNKNOWN, source: "no defensible source" }
     if (q.conflict)
       warnings.push(
         `${m.id}: quantization conflict — registry ${String(q.conflict.registry)} vs /api/show ${String(q.conflict["api/show"])} (registry wins)`,

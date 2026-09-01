@@ -61,11 +61,11 @@ export function quantizationFromShow(show: unknown): string | null {
 export const IMPLICIT_QUANTIZATION: Record<string, { value: string; source: string }> = {
   "glm-5.2": {
     value: "FP8",
-    source: "implicit-hf (zai-org/GLM-5.2-FP8 checkpoint + familia glm FP8)",
+    source: "implicit-hf (zai-org/GLM-5.2-FP8 checkpoint + glm family FP8)",
   },
   "nemotron-3-ultra": {
     value: "NVFP4",
-    source: "implicit-library (README de nemotron-3-ultra + checkpoints NVIDIA)",
+    source: "implicit-library (nemotron-3-ultra library README + NVIDIA checkpoints)",
   },
 }
 
@@ -105,22 +105,25 @@ export function resolveQuantization(input: QuantizationInput): QuantizationResul
     return { quantization: registryValue, source: "registry-ollama" }
   }
 
+  // Researched implicit values come BEFORE the previous-run fallback: models
+  // like glm-5.2/nemotron-3-ultra have ALWAYS had an empty registry blob, so
+  // their implicit provenance is the truth and must not degrade to "previous
+  // run" on every refresh.
+  const implicit = IMPLICIT_QUANTIZATION[input.id]
+  if (implicit) return { quantization: implicit.value, source: implicit.source }
+
   // Never publish a silent regression to "unknown": if the previous catalog
   // carried a value, keep it whether the registry is unreachable OR reachable
-  // but now empty (the very condition that emptied glm-5.2/nemotron-3-ultra).
-  // The source label marks it and the warning tells CI to look.
+  // but now empty. The source label marks it and the warning tells CI to look.
   if (input.previous && input.previous !== QUANT_UNKNOWN) {
-    if (input.registryFailed) return { quantization: input.previous, source: "registry-ollama (corrida anterior)" }
+    if (input.registryFailed) return { quantization: input.previous, source: "registry-ollama (previous run)" }
     // registry answered but with an empty/absent file_type — a data change
     return {
       quantization: input.previous,
-      source: "registry-ollama (corrida anterior — blob vacío ahora)",
+      source: "registry-ollama (previous run, blob empty now)",
       warning: input.id,
     }
   }
 
-  const implicit = IMPLICIT_QUANTIZATION[input.id]
-  if (implicit) return { quantization: implicit.value, source: implicit.source }
-
-  return { quantization: QUANT_UNKNOWN, source: "sin fuente defendible" }
+  return { quantization: QUANT_UNKNOWN, source: "no defensible source" }
 }

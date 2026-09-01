@@ -113,7 +113,7 @@ const showModel = async (api: TuiLike, pricingOn: boolean): Promise<void> => {
   try {
     const file = await sessionFile()
     const modelID = file?.steps[0]?.modelID
-    let body = "  ficha\n\n  Cuantización      — (no disponible)\n\n  (modelo fuera del catálogo — sin estimaciones)"
+    let body = "  Card\n\n  Quantization      — (unavailable)\n\n  (model outside the catalog, nothing estimated)"
     let title = "/model"
     if (modelID) {
       try {
@@ -134,13 +134,13 @@ const showModel = async (api: TuiLike, pricingOn: boolean): Promise<void> => {
           }
           body = formatModelCard(card, pricingOn)
         } else {
-          title = `/model · ${modelID} (fuera del catálogo)`
+          title = `/model · ${modelID} (not in catalog)`
         }
       } catch {
-        title = `/model · ${modelID} (catálogo indisponible)`
+        title = `/model · ${modelID} (catalog unavailable)`
       }
     } else {
-      body = "  sin respuestas medidas todavía en esta sesión —\n  abre /model tras una respuesta"
+      body = "  No measured responses yet in this session —\n  run /model after a response"
     }
     api.ui.dialog.replace(() => api.ui.DialogAlert({ title, message: body, onConfirm: () => api.ui.dialog.clear() }))
   } catch (error) {

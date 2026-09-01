@@ -60,35 +60,35 @@ describe("resolveQuantization (registry primario + testigo avisable)", () => {
   test("sin fuente defendible → literal unknown (minimax-m3 / minimax-m2.7)", () => {
     expect(resolveQuantization({ id: "minimax-m3" })).toEqual({
       quantization: "unknown",
-      source: "sin fuente defendible",
+      source: "no defensible source",
     })
     expect(resolveQuantization({ id: "minimax-m2.7", registry: "", show: "" })).toEqual({
       quantization: "unknown",
-      source: "sin fuente defendible",
+      source: "no defensible source",
     })
   })
 
   test("caída transitoria del registry conserva el valor anterior (sin regresión)", () => {
     expect(resolveQuantization({ id: "kimi-k3", registryFailed: true, previous: "MXFP4" })).toEqual({
       quantization: "MXFP4",
-      source: "registry-ollama (corrida anterior)",
+      source: "registry-ollama (previous run)",
     })
     // pero un previous "unknown" no se perpetúa como fuente
     expect(resolveQuantization({ id: "minimax-m2.7", registryFailed: true, previous: "unknown" })).toEqual({
       quantization: "unknown",
-      source: "sin fuente defendible",
+      source: "no defensible source",
     })
   })
 
   test("registry alcanzable pero blob vacío con valor previo: conserva previous + aviso (sin regresión)", () => {
     const r = resolveQuantization({ id: "kimi-k3", registry: "", previous: "MXFP4" })
     expect(r.quantization).toBe("MXFP4")
-    expect(r.source).toBe("registry-ollama (corrida anterior — blob vacío ahora)")
+    expect(r.source).toBe("registry-ollama (previous run, blob empty now)")
     expect(r.warning).toBe("kimi-k3") // CI avisa: posible cambio del registry
     // pero un previous "unknown" sigue resolviendo a unknown (nada que conservar)
     expect(resolveQuantization({ id: "minimax-m2.7", registry: "", previous: "unknown" })).toEqual({
       quantization: "unknown",
-      source: "sin fuente defendible",
+      source: "no defensible source",
     })
   })
 })

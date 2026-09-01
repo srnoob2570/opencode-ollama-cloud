@@ -9,7 +9,7 @@
       "OLLAMA_API_KEY"
     ]
   },
-  "generatedAt": "2026-09-01T02:49:30.904Z",
+  "generatedAt": "2026-09-01T04:55:01.525Z",
   "modelsHash": "e06ea128b326f65bf969a63418eba2277f53ca5e4b266ee92d049054d45609a4",
   "models": [
     {
@@ -247,7 +247,7 @@
       },
       "sources": {
         "pricing": "models.dev",
-        "quantization": "implicit-hf (zai-org/GLM-5.2-FP8 checkpoint + familia glm FP8)"
+        "quantization": "implicit-hf (zai-org/GLM-5.2-FP8 checkpoint + glm family FP8)"
       },
       "quantization": "FP8"
     },
@@ -310,7 +310,7 @@
       },
       "sources": {
         "pricing": "models.dev",
-        "quantization": "implicit-library (README de nemotron-3-ultra + checkpoints NVIDIA)"
+        "quantization": "implicit-library (nemotron-3-ultra library README + NVIDIA checkpoints)"
       },
       "quantization": "NVFP4"
     },
@@ -347,7 +347,7 @@
       },
       "sources": {
         "pricing": "models.dev",
-        "quantization": "sin fuente defendible"
+        "quantization": "no defensible source"
       },
       "quantization": "unknown"
     },
@@ -474,7 +474,7 @@
       },
       "sources": {
         "pricing": "models.dev",
-        "quantization": "sin fuente defendible"
+        "quantization": "no defensible source"
       },
       "quantization": "unknown"
     },

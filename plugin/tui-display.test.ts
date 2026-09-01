@@ -48,10 +48,10 @@ describe("línea live (mock §1 — formato ratificado)", () => {
 describe("diálogo /stats (mock §2)", () => {
   test("resumen arriba + últimas respuestas debajo", () => {
     const body = formatStatsDialogBody(summary(), [step({ ts: 1_790_000_000_000 })], "glm-5.3", NOW)
-    expect(body).toContain("Sesión · glm-5.3")
+    expect(body).toContain("Session · glm-5.3")
     expect(body).toContain("38.2 tok/s · TTFT 380 ms · Session average")
-    expect(body).toContain("5 respuestas · 1.8k t salida")
-    expect(body).toContain("hace 1m   31.2 tok/s · TTFT 310 ms · 312 t")
+    expect(body).toContain("5 responses · 1.8k t output")
+    expect(body).toContain("1m ago   31.2 tok/s · TTFT 310 ms · 312 t")
   })
 
   test("estado vacío textual", () => {
@@ -64,9 +64,9 @@ describe("diálogo /stats (mock §2)", () => {
   })
 
   test("ages legibles (relativo)", () => {
-    expect(formatRelativeAge(NOW - 5_000, NOW)).toBe("hace 5s")
-    expect(formatRelativeAge(NOW - 90_000, NOW)).toBe("hace 1m")
-    expect(formatRelativeAge(NOW - 7_200_000, NOW)).toBe("hace 2h 0m")
+    expect(formatRelativeAge(NOW - 5_000, NOW)).toBe("5s ago")
+    expect(formatRelativeAge(NOW - 90_000, NOW)).toBe("1m ago")
+    expect(formatRelativeAge(NOW - 7_200_000, NOW)).toBe("2h 0m ago")
   })
 })
 
@@ -86,16 +86,16 @@ describe("ficha /model (mock §3 — tres estados de cuantización)", () => {
 
   test("cuantización declarada + nota al pie + precio según knob", () => {
     const card = formatModelCard(model(), true)
-    expect(card).toContain("FP8 (declarada)")
-    expect(card).toContain("cuantización declarada por Ollama — no garantiza la")
+    expect(card).toContain("FP8 (declared)")
+    expect(card).toContain("quantization declared by Ollama. Does not")
     expect(card).toContain("1M")
     const off = formatModelCard(model(), false)
-    expect(off).not.toContain("Precio ref.")
+    expect(off).not.toContain("Ref. price")
   })
 
   test("sin fuente defendible → desconocida; fuera de catálogo → —", () => {
-    expect(formatModelCard(model({ quantization: "unknown" }), false)).toContain("Cuantización      desconocida")
-    expect(formatModelCard(model({ quantization: undefined }), false)).toContain("Cuantización      — (no disponible)")
+    expect(formatModelCard(model({ quantization: "unknown" }), false)).toContain("Quantization      unknown")
+    expect(formatModelCard(model({ quantization: undefined }), false)).toContain("Quantization      — (unavailable)")
   })
 })
 
@@ -146,13 +146,13 @@ describe("ficha /model — cuantización implícita no es «declarada» (code re
 
   test("source implícita → etiqueta (implícita) y footer sin atribuir a Ollama", () => {
     const card = formatModelCard({ ...base, quantizationSource: "implicit-hf (zai-org/GLM-5.2-FP8 checkpoint + familia glm FP8)" }, false)
-    expect(card).toContain("FP8 (implícita)")
-    expect(card).toContain("cuantización implícita según fuentes públicas")
-    expect(card).not.toContain("(declarada)")
+    expect(card).toContain("FP8 (implicit)")
+    expect(card).toContain("quantization researched from public sources")
+    expect(card).not.toContain("(declared)")
   })
 
   test("source registry mantiene «(declarada)»", () => {
     const card = formatModelCard({ ...base, quantizationSource: "registry-ollama" }, false)
-    expect(card).toContain("FP8 (declarada)")
+    expect(card).toContain("FP8 (declared)")
   })
 })

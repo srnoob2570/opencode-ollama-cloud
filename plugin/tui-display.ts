@@ -9,38 +9,38 @@ export function formatLiveLine(summary: SessionSummary | null): string {
   return `${summary.avgTps.toFixed(1)} tok/s · TTFT ${Math.round(summary.avgTtftMs)} ms · Session average`
 }
 
-/** Relative timestamp for the /stats dialog ("hace 1m"), stable format. */
+/** Relative timestamp for the /stats dialog ("1m ago"), stable format. */
 export function formatRelativeAge(ts: number, now: number): string {
   const s = Math.max(1, Math.round((now - ts) / 1000))
-  if (s < 60) return `hace ${s}s`
+  if (s < 60) return `${s}s ago`
   const m = Math.floor(s / 60)
-  if (m < 60) return `hace ${m}m`
-  return `hace ${Math.floor(m / 60)}h ${m % 60}m`
+  if (m < 60) return `${m}m ago`
+  return `${Math.floor(m / 60)}h ${m % 60}m ago`
 }
 
 const tokensLabel = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(1)}k t` : `${n} t`)
 
-/** One row of the /stats dialog's últimas respuestas (steps, newest first). */
+/** One row of the /stats dialog's recent responses (steps, newest first). */
 export function formatStepRow(step: StepMeasurement, now: number): string {
   const tps = step.decodeMs > 0 ? (step.tokensOut / (step.decodeMs / 1000)).toFixed(1) : "—"
   return `${formatRelativeAge(step.ts, now)}   ${tps} tok/s · TTFT ${Math.round(step.ttftMs)} ms · ${tokensLabel(step.tokensOut)} ${step.source === "event" ? "(event)" : ""}`
 }
 
-export const EMPTY_SESSION_LINE = "sin respuestas medidas todavía — llega la primera y aparecen"
+export const EMPTY_SESSION_LINE = "No measured responses yet — the first one fills this in"
 
-/** The /stats dialog body (mock §2): summary block + últimas respuestas. */
+/** The /stats dialog body (mock §2): summary block + recent responses. */
 export function formatStatsDialogBody(
   summary: SessionSummary,
   steps: readonly StepMeasurement[],
   modelID = "—",
   now = Date.now(),
 ): string {
-  if (summary.steps === 0) return `  Sesión · ${modelID}\n\n  ${EMPTY_SESSION_LINE}`
+  if (summary.steps === 0) return `  Session · ${modelID}\n\n  ${EMPTY_SESSION_LINE}`
   const head = [
-    `  Sesión · ${modelID}`,
+    `  Session · ${modelID}`,
     "",
     `  ${summary.avgTps.toFixed(1)} tok/s · TTFT ${Math.round(summary.avgTtftMs)} ms · Session average`,
-    `  ${summary.steps} respuestas · ${tokensLabel(summary.tokensOutTotal)} salida`,
+    `  ${summary.steps} responses · ${tokensLabel(summary.tokensOutTotal)} output`,
   ]
   const rows = steps.slice(0, 10).map((s) => `  ${formatStepRow(s, now)}`)
   return [...head, rows.length ? "" : "", ...rows].filter((line) => line !== undefined).join("\n")
@@ -61,28 +61,27 @@ export interface ModelCard {
   pricing?: { input: number; output: number } | null
 }
 
-/** The /model ficha (mock §3) — quantization is the protagonist. */
+/** The /model card (mock §3) — quantization is the protagonist. */
 export function formatModelCard(model: ModelCard, pricingOn: boolean): string {
   const implicit = model.quantizationSource?.startsWith("implicit") ?? false
   const quantization = !model.quantization
-    ? "— (no disponible)"
+    ? "— (unavailable)"
     : model.quantization === "unknown"
-      ? "desconocida"
-      : `${model.quantization} ${implicit ? "(implícita)" : "(declarada)"}`
+      ? "unknown"
+      : `${model.quantization} ${implicit ? "(implicit)" : "(declared)"}`
   const rows = [
-    `  Nombre            ${model.name}                ollama-cloud`,
-    `  ${model.id} · familia ${model.family} · ${model.releaseDate}`,
+    `  Name              ${model.name}                ollama-cloud`,
+    `  ${model.id} · family ${model.family} · ${model.releaseDate}`,
     "",
-    `  Cuantización      ${quantization}`,
-    `  Contexto          ${formatTokens(model.context)} · salida ${formatTokens(model.maxOutput)}`,
-    `  Capacidades       ${capabilityList(model.capabilities)}`,
-    ...(pricingOn ? [`  Precio ref.       $${model.pricing?.input ?? "—"}/${model.pricing?.output ?? "—"} por 1M`] : []),
+    `  Quantization      ${quantization}`,
+    `  Context           ${formatTokens(model.context)} · output ${formatTokens(model.maxOutput)}`,
+    `  Capabilities      ${capabilityList(model.capabilities)}`,
+    ...(pricingOn ? [`  Ref. price        $${model.pricing?.input ?? "—"}/${model.pricing?.output ?? "—"} per 1M`] : []),
     "",
     implicit
-      ? `  cuantización implícita según fuentes públicas (HF/library)`
-  + ` — no garantiza la`
-      : `  cuantización declarada por Ollama — no garantiza la`,
-    `  precisión servida`,
+      ? `  quantization researched from public sources. Does`
+      : `  quantization declared by Ollama. Does not`,
+    `  guarantee the precision actually served.`,
   ]
   return rows.join("\n")
 }
