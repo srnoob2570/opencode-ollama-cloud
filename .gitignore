@@ -7,3 +7,4 @@ research/
 .scratch/
 # Bun es el gestor del repo; un package-lock.json npm local nunca debe colarse
 package-lock.json
+docs
