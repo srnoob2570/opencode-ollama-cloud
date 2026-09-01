@@ -7,10 +7,19 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 
 ## [0.1.6] - 2026-09-01
 
+### Added
+
+- `bun run update-pricing`. You refresh the pricing table by hand, never on a schedule. The command fetches Ollama's live rate card, prints every rate that changed and rewrites `catalog/pricing.json`. When the page and the catalog disagree, say a model Ollama just added or retired, it stops with a report and writes nothing.
+- Pre-commit hooks. Contributors get prettier formatting and a typecheck gate; `pre-commit install` sets them up.
+
 ### Changed
 
-- Pricing is now the **official Ollama Cloud rate** and it is **on by default**. Ollama publishes a public [rate card](https://ollama.com/pricing) with input, cached-input and output prices per million tokens — what your credits actually pay — and the plugin's cost counter and `/model` card show it without any configuration. `pricing: "off"` turns it off; the old opt-in value `pricing: "reference"` still works and means "on". This replaces the old upstream "reference price" built from models.dev with manual overrides: that estimate existed because Ollama published no rates, and `catalog/pricing-overrides.json` is gone.
-- The pricing table is refreshed by a **manual workflow**: `bun run update-pricing` fetches the live rate card, prints a rate-by-rate diff and rewrites `catalog/pricing.json`; if the page and the catalog disagree it aborts with a report and writes nothing. The automated catalog update never touches pricing.
+- Pricing now shows the official Ollama Cloud rate by default, the number your credits actually pay per million tokens. The rates come from Ollama's public [rate card](https://ollama.com/pricing) and ship in `catalog/pricing.json`. No configuration needed. `pricing: "off"` turns it off; the old `pricing: "reference"` still works and means on.
+- The `/model` card lists the three rates: input, cached input and output. Cache reads are priced at the cached-input rate, so sessions with cache hits cost what Ollama actually charges.
+
+### Removed
+
+- The upstream "reference price" and `catalog/pricing-overrides.json`. That estimate existed because Ollama published no rates; with an official rate card there is nothing left to correct. Pricing no longer ships inside `catalog/catalog.json` either. The table is the only home for rates, and the automated catalog update cannot touch it.
 
 ## [0.1.5] - 2026-09-01
 
