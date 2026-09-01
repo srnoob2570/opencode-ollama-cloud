@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { CatalogModel } from "../plugin/catalog.ts"
 import { MODELS_DEV_URL, resolveCatalog, type PricingOverrides } from "./resolve-catalog.ts"
+import { catalogModel } from "./test-fixtures.ts"
 
 // Seed excerpt mirrors models.dev 2026-08-30 for the mapped families
 // (wayfinder ticket "tabla de precio de referencia por modelo"). Costs are
@@ -19,18 +20,7 @@ const SEED = {
   provider_unrelated: { models: { "glm-5.3-flash": { cost: { input: 9, output: 9 } } } },
 }
 
-const model = (id: string): CatalogModel => ({
-  id,
-  name: id,
-  created: 0,
-  family: id.split(":")[0],
-  capabilities: { tools: true, thinking: false, vision: false },
-  input: ["text"],
-  context: 128 * 1024,
-  maxOutput: 32768,
-  reasoningOptions: [],
-  releaseDate: "2026-08-30",
-})
+const model = catalogModel
 
 const resolve = (models: CatalogModel[], overrides: PricingOverrides = {}, today = "2026-08-30") =>
   resolveCatalog(models, { seed: SEED, overrides, today })

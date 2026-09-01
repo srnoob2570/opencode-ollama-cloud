@@ -24,6 +24,11 @@ export interface CatalogModel {
   maxOutput: number
   reasoningOptions: string[]
   releaseDate: string
+  /** Raw quantization Ollama declares for the served model (registry file_type
+   * + /api/show quantization_level) — or the literal "unknown". DECLARATIVE
+   * metadata, never a guarantee of remote inference precision. No closed enum:
+   * a new Ollama format must not block the updater. */
+  quantization?: string
   /** Reference price of the upstream API (USD per 1M tokens) — not billing. */
   pricing?: ModelPricing
   /** Per-field provenance: which source provided each value. */
@@ -59,8 +64,6 @@ export interface Catalog {
 export interface PluginOpts {
   catalogUrl?: string
   timeoutMs?: number
-  /** Whether opencode's session cost counter shows the catalog's reference prices. */
-  pricing?: "off" | "reference"
 }
 
 const DEFAULT_URLS = [
@@ -106,18 +109,28 @@ export function isCatalog(value: unknown): value is Catalog {
         // shaped {input, output} pricing from a custom catalogUrl keeps
         // loading. The published schema (catalog.schema.json) is stricter.
         (!m.pricing ||
+          // Pricing invariant: positive finite input/output — the same rule
+          // lives in resolve-catalog.ts (realCost/isOverride) and
+          // catalog.schema.json (exclusiveMinimum 0). Keep all three in sync.
           (Number.isFinite(m.pricing.input) &&
             m.pricing.input > 0 &&
             Number.isFinite(m.pricing.output) &&
             m.pricing.output > 0 &&
             (m.pricing.unit === undefined || m.pricing.unit === "per-1M"))) &&
         (m.sources === undefined || typeof m.sources === "object") &&
-        (m.conflicts === undefined || typeof m.conflicts === "object"),
+        (m.conflicts === undefined || typeof m.conflicts === "object") &&
+        // optional quantization: absent (old catalogs) is fine; a present one
+        // is shape-only (non-empty string) — never an enum, so a new Ollama
+        // format cannot break the loader (CI advises, never fails)
+        (m.quantization === undefined || (typeof m.quantization === "string" && m.quantization.length > 0)),
     )
   )
 }
 
-async function fetchJson(url: string, timeoutMs: number): Promise<unknown | null> {
+// Runtime-side fetch: best-effort (null on any failure) — the plugin must
+// never throw on a down CDN. scripts/update-catalog.ts's fetchJson is
+// intentionally the opposite (fail loud) because CI should block on errors.
+async function fetchCatalogJson(url: string, timeoutMs: number): Promise<unknown | null> {
   try {
     const res = await fetch(url, {
       signal: AbortSignal.timeout(timeoutMs),
@@ -154,7 +167,7 @@ export async function loadCatalog(opts: PluginOpts = {}): Promise<Catalog | null
 
   // A user-configured URL keeps documented priority ("tried first") over the defaults.
   if (opts.catalogUrl) {
-    const data = await fetchJson(opts.catalogUrl, timeoutMs)
+    const data = await fetchCatalogJson(opts.catalogUrl, timeoutMs)
     if (isCatalog(data)) {
       void writeCache(data)
       return data
@@ -163,12 +176,13 @@ export async function loadCatalog(opts: PluginOpts = {}): Promise<Catalog | null
 
   // Race the default mirrors in parallel: first response passing validation wins.
   // Sequential tries cost up to urls.length * timeoutMs on a network outage before
-  // falling back to the disk cache.
-  const data = await new Promise<unknown>((resolve) => {
+  // falling back to the disk cache. The promise only resolves with a Catalog that
+  // already passed isCatalog (or null), so no re-validation is needed after.
+  const data = await new Promise<Catalog | null>((resolve) => {
     let pending = DEFAULT_URLS.length
     let settled = false
     for (const url of DEFAULT_URLS) {
-      void fetchJson(url, timeoutMs).then((d) => {
+      void fetchCatalogJson(url, timeoutMs).then((d) => {
         if (settled) return
         if (isCatalog(d)) {
           settled = true
@@ -180,7 +194,7 @@ export async function loadCatalog(opts: PluginOpts = {}): Promise<Catalog | null
     }
   })
 
-  if (isCatalog(data)) {
+  if (data) {
     void writeCache(data)
     return data
   }

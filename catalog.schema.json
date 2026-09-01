@@ -59,6 +59,7 @@
             "items": { "type": "string" }
           },
           "releaseDate": { "type": "string" },
+          "quantization": { "type": "string", "minLength": 1 },
           "pricing": {
             "type": "object",
             "required": ["input", "output", "unit", "provider", "source", "asOf"],

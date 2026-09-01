@@ -5,6 +5,26 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-09-01
+
+### Added
+
+- **Streaming stats (opt-out), idea by [@adilfaisal01](https://github.com/adilfaisal01)**: the plugin measures TTFT and tokens/s per LLM step client-side — wire-accurate for `ollama-cloud` (wrapped provider `fetch` + final `usage` chunk), event-derived for any other provider — and shows a live session average (`38.2 tok/s · TTFT 380 ms · Session average`) next to the token counter. The average belongs to the session, not the model: no per-model breakdown, no reset when switching models, main thread only (subagents, titlegen and compaction excluded by verified signals), in-memory per session. Requires the second plugin entry `"@srnoob2570/opencode-ollama-cloud/tui"`; the TUI plugin API it uses is present but undocumented in opencode 1.18.25, so the stats UI degrades silently when the API moves. `stats: "off"` on both entries reduces the plugin to its exact previous behavior.
+- `/stats` and `/model` TUI dialogs: session summary + latest responses, and the model card (quantization, family, capabilities, limits, release, reference price when `pricing: "reference"`).
+- **Quantization in the catalog and the model card**: the updater extracts the raw value Ollama declares (registry config blob `file_type` via `<ref>-cloud` manifests, cross-checked against `POST /api/show`; disagreements recorded in `conflicts`, CI advises). Coverage: 15/19 from the registry, `glm-5.2` → FP8 and `nemotron-3-ultra` → NVFP4 carried as researched implicit values with provenance, `minimax-m3`/`minimax-m2.7` literal `unknown`. Optional, shape-only, no closed enum — new Ollama formats cannot break the updater. Disclosure: **declared, not guaranteed** (the remote inference precision is not documented by Ollama).
+
+### Removed
+
+- **Type-level breaking**: the unused `pricing` field was dropped from the exported `PluginOpts` type. The user-facing `pricing` plugin option (`"off" | "reference"` in the opencode config) is unchanged — only code constructing the internal `PluginOpts` type with a `pricing` property will fail typecheck on upgrade. Runtime behavior is identical.
+
+### Changed
+
+- Internal simplification pass: shared test fixtures, unified `family` vocabulary, single models.dev seed URL, strict updater CLI (`[check|update] [--force]`, unknown arguments now exit 1 instead of running an update).
+
+### CI
+
+- Catalog validation now checks the published JSON schema too (`ajv` + `ajv-formats`), not only the hand-mirrored `isCatalog` — the two contracts can no longer drift apart silently.
+
 ## [0.1.3] - 2026-08-31
 
 ### Added
@@ -61,7 +81,8 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 - README in English and Spanish.
 - CI refreshes the catalog on a schedule and verifies the catalog before publishing.
 
-[Unreleased]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.0...v0.1.1

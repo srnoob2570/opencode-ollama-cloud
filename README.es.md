@@ -92,6 +92,58 @@ catalog.json (jsDelivr, purgado tras cada commit / raw.githubusercontent / cache
 
 El catálogo trae un **precio de referencia** por modelo — la tarifa de la API upstream en USD por 1M de tokens, construida automáticamente desde las entradas first-party de models.dev y corregible en `catalog/pricing-overrides.json` (los overrides ganan; los desacuerdos con el seed quedan registrados en `conflicts`). Son precios de referencia, **no facturación**: tu plan de ollama.com no cobra por uso, y la tarifa real solo es visible en tu panel de ollama.com. Los modelos sin datos de precio quedan en $0 (sin estimaciones a medias).
 
+## Estadísticas de streaming y ficha de modelo
+
+El plugin mide lo que opencode no guarda: **TTFT** (tiempo hasta el primer
+token) y **tokens/s** de cada LLM step, del lado del cliente — con precisión de
+wire en `ollama-cloud` (el plugin envuelve el `fetch` del provider y lee el
+chunk final de `usage` que opencode ya pide) y por eventos para cualquier otro
+proveedor. Muestra el **promedio de la sesión** — las métricas son de la
+sesión, no del modelo activo (sin desglose por modelo ni reset al cambiar), —
+junto al contador de tokens:
+
+```
+12.4k tokens (23%) · $0.02 · 38.2 tok/s · TTFT 380 ms · Session average
+```
+
+- `/stats` — resumen de sesión y últimas respuestas (detalle por step; las
+  filas `wire` y `event` son distinguibles).
+- `/model` — ficha del modelo activo: cuantización, familia, capacidades,
+  límites, release y precio de referencia (con `pricing: "reference"`).
+
+El promedio solo cuenta el **chat principal**: subagentes, titlegen y
+compaction jamás entran (señales verificadas contra el código de opencode).
+Los números viven en memoria por sesión — no se persiste nada ni sale nada de
+tu máquina. La UI de stats es una segunda entrada de plugin y degrada en
+silencio: en un opencode donde la API TUI cambió, provider/catálogo siguen
+funcionando y las stats simplemente desaparecen (probado contra opencode
+**1.18.25**; la API que usa existe pero no está documentada — stats UI es
+best-effort hasta que upstream la documente).
+
+```json
+{
+  "plugin": [
+    ["@srnoob2570/opencode-ollama-cloud", { "pricing": "reference" }],
+    ["@srnoob2570/opencode-ollama-cloud/tui", {}]
+  ]
+}
+```
+
+- `stats`: `"on"` (default) o `"off"` — ponlo en **ambas entradas** y todo se
+  apaga: sin medición, sin UI, exactamente el plugin de siempre.
+
+### Cuantización: declarada, no garantizada
+
+La **cuantización** de la ficha es el valor que Ollama **declara** para el
+modelo que sirve (`file_type` del registry, contrastado con `/api/show`),
+investigado por modelo y transportado en el catálogo — **no** garantiza la
+precisión a la que corre realmente la inferencia remota. Los modelos sin
+fuente pública defendible muestran `desconocida` (nunca se inventan), y los
+modelos fuera del catálogo muestran `—`.
+
+Crédito del origen de la idea: el usuario de GitHub
+**[@adilfaisal01](https://github.com/adilfaisal01)**.
+
 ## Desarrollo
 
 ```bash

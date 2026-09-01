@@ -9,7 +9,7 @@
       "OLLAMA_API_KEY"
     ]
   },
-  "generatedAt": "2026-08-31T08:23:59.576Z",
+  "generatedAt": "2026-09-01T02:49:30.904Z",
   "modelsHash": "e06ea128b326f65bf969a63418eba2277f53ca5e4b266ee92d049054d45609a4",
   "models": [
     {
@@ -39,11 +39,13 @@
         "unit": "per-1M",
         "provider": "zai",
         "source": "https://models.dev/api.json",
-        "asOf": "2026-08-31"
+        "asOf": "2026-09-01"
       },
       "sources": {
-        "pricing": "models.dev"
-      }
+        "pricing": "models.dev",
+        "quantization": "registry-ollama"
+      },
+      "quantization": "FP8"
     },
     {
       "id": "glm-5.3-flash",
@@ -77,7 +79,8 @@
         "note": "precio de lista; models.dev lleva promo -50% vigente hasta 2026-09-09"
       },
       "sources": {
-        "pricing": "override"
+        "pricing": "override",
+        "quantization": "registry-ollama"
       },
       "conflicts": {
         "pricing": {
@@ -87,7 +90,8 @@
           },
           "resolver": "override-wins"
         }
-      }
+      },
+      "quantization": "FP8"
     },
     {
       "id": "deepseek-v4-pro:0813",
@@ -119,7 +123,8 @@
         "note": "tarifa oficial peak vigente (off-peak 50%)"
       },
       "sources": {
-        "pricing": "override"
+        "pricing": "override",
+        "quantization": "registry-ollama"
       },
       "conflicts": {
         "pricing": {
@@ -129,7 +134,8 @@
           },
           "resolver": "override-wins"
         }
-      }
+      },
+      "quantization": "FP8"
     },
     {
       "id": "deepseek-v4-flash:0731",
@@ -161,7 +167,8 @@
         "note": "tarifa oficial peak vigente (off-peak 50%)"
       },
       "sources": {
-        "pricing": "override"
+        "pricing": "override",
+        "quantization": "registry-ollama"
       },
       "conflicts": {
         "pricing": {
@@ -171,7 +178,8 @@
           },
           "resolver": "override-wins"
         }
-      }
+      },
+      "quantization": "FP8"
     },
     {
       "id": "kimi-k3",
@@ -201,11 +209,13 @@
         "unit": "per-1M",
         "provider": "moonshotai",
         "source": "https://models.dev/api.json",
-        "asOf": "2026-08-31"
+        "asOf": "2026-09-01"
       },
       "sources": {
-        "pricing": "models.dev"
-      }
+        "pricing": "models.dev",
+        "quantization": "registry-ollama"
+      },
+      "quantization": "MXFP4"
     },
     {
       "id": "glm-5.2",
@@ -233,11 +243,13 @@
         "unit": "per-1M",
         "provider": "zai",
         "source": "https://models.dev/api.json",
-        "asOf": "2026-08-31"
+        "asOf": "2026-09-01"
       },
       "sources": {
-        "pricing": "models.dev"
-      }
+        "pricing": "models.dev",
+        "quantization": "implicit-hf (zai-org/GLM-5.2-FP8 checkpoint + familia glm FP8)"
+      },
+      "quantization": "FP8"
     },
     {
       "id": "kimi-k2.7-code",
@@ -263,11 +275,13 @@
         "unit": "per-1M",
         "provider": "moonshotai",
         "source": "https://models.dev/api.json",
-        "asOf": "2026-08-31"
+        "asOf": "2026-09-01"
       },
       "sources": {
-        "pricing": "models.dev"
-      }
+        "pricing": "models.dev",
+        "quantization": "registry-ollama"
+      },
+      "quantization": "INT4"
     },
     {
       "id": "nemotron-3-ultra",
@@ -292,11 +306,13 @@
         "unit": "per-1M",
         "provider": "nvidia",
         "source": "https://models.dev/api.json",
-        "asOf": "2026-08-31"
+        "asOf": "2026-09-01"
       },
       "sources": {
-        "pricing": "models.dev"
-      }
+        "pricing": "models.dev",
+        "quantization": "implicit-library (README de nemotron-3-ultra + checkpoints NVIDIA)"
+      },
+      "quantization": "NVFP4"
     },
     {
       "id": "minimax-m3",
@@ -327,11 +343,13 @@
         "unit": "per-1M",
         "provider": "minimax",
         "source": "https://models.dev/api.json",
-        "asOf": "2026-08-31"
+        "asOf": "2026-09-01"
       },
       "sources": {
-        "pricing": "models.dev"
-      }
+        "pricing": "models.dev",
+        "quantization": "sin fuente defendible"
+      },
+      "quantization": "unknown"
     },
     {
       "id": "kimi-k2.6",
@@ -357,11 +375,13 @@
         "unit": "per-1M",
         "provider": "moonshotai",
         "source": "https://models.dev/api.json",
-        "asOf": "2026-08-31"
+        "asOf": "2026-09-01"
       },
       "sources": {
-        "pricing": "models.dev"
-      }
+        "pricing": "models.dev",
+        "quantization": "registry-ollama"
+      },
+      "quantization": "INT4"
     },
     {
       "id": "glm-5.1",
@@ -386,11 +406,13 @@
         "unit": "per-1M",
         "provider": "zai",
         "source": "https://models.dev/api.json",
-        "asOf": "2026-08-31"
+        "asOf": "2026-09-01"
       },
       "sources": {
-        "pricing": "models.dev"
-      }
+        "pricing": "models.dev",
+        "quantization": "registry-ollama"
+      },
+      "quantization": "FP8"
     },
     {
       "id": "gemma4:31b",
@@ -420,8 +442,10 @@
         "note": "Bedrock (AWS) exacto + novita testigo"
       },
       "sources": {
-        "pricing": "override"
-      }
+        "pricing": "override",
+        "quantization": "registry-ollama"
+      },
+      "quantization": "BF16"
     },
     {
       "id": "minimax-m2.7",
@@ -446,11 +470,13 @@
         "unit": "per-1M",
         "provider": "minimax",
         "source": "https://models.dev/api.json",
-        "asOf": "2026-08-31"
+        "asOf": "2026-09-01"
       },
       "sources": {
-        "pricing": "models.dev"
-      }
+        "pricing": "models.dev",
+        "quantization": "sin fuente defendible"
+      },
+      "quantization": "unknown"
     },
     {
       "id": "nemotron-3-super",
@@ -475,11 +501,13 @@
         "unit": "per-1M",
         "provider": "nvidia",
         "source": "https://models.dev/api.json",
-        "asOf": "2026-08-31"
+        "asOf": "2026-09-01"
       },
       "sources": {
-        "pricing": "models.dev"
-      }
+        "pricing": "models.dev",
+        "quantization": "registry-ollama"
+      },
+      "quantization": "NVFP4"
     },
     {
       "id": "qwen3.5:397b",
@@ -505,11 +533,13 @@
         "unit": "per-1M",
         "provider": "alibaba",
         "source": "https://models.dev/api.json",
-        "asOf": "2026-08-31"
+        "asOf": "2026-09-01"
       },
       "sources": {
-        "pricing": "models.dev"
-      }
+        "pricing": "models.dev",
+        "quantization": "registry-ollama"
+      },
+      "quantization": "BF16"
     },
     {
       "id": "nemotron-3-nano:30b",
@@ -538,8 +568,10 @@
         "note": "dos hosts 0.05/0.2; bedrock publicado 0.06/0.24"
       },
       "sources": {
-        "pricing": "override"
-      }
+        "pricing": "override",
+        "quantization": "registry-ollama"
+      },
+      "quantization": "FP8"
     },
     {
       "id": "mistral-large-3:675b",
@@ -565,11 +597,13 @@
         "unit": "per-1M",
         "provider": "mistral",
         "source": "https://models.dev/api.json",
-        "asOf": "2026-08-31"
+        "asOf": "2026-09-01"
       },
       "sources": {
-        "pricing": "models.dev"
-      }
+        "pricing": "models.dev",
+        "quantization": "registry-ollama"
+      },
+      "quantization": "FP8"
     },
     {
       "id": "gpt-oss:120b",
@@ -602,8 +636,10 @@
         "note": "4/9 hosts coinciden en 0.15/0.6; openai no publica"
       },
       "sources": {
-        "pricing": "override"
-      }
+        "pricing": "override",
+        "quantization": "registry-ollama"
+      },
+      "quantization": "MXFP4"
     },
     {
       "id": "gpt-oss:20b",
@@ -636,8 +672,10 @@
         "note": "exacto; groq/vertex 0.075/0.3"
       },
       "sources": {
-        "pricing": "override"
-      }
+        "pricing": "override",
+        "quantization": "registry-ollama"
+      },
+      "quantization": "MXFP4"
     }
   ]
 }

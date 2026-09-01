@@ -1,21 +1,20 @@
 import { describe, expect, test } from "bun:test"
+import { catalogModel } from "../scripts/test-fixtures.ts"
 import type { CatalogModel } from "./catalog.ts"
 import { toModelV2 } from "./index.ts"
+import opencodeOllamaCloud from "./index.ts"
 
-// Fixtures mirror the live glm-5.3 / glm-5.1 catalog entries (2026-08): glm-5.3
-// advertises thinking tiers, glm-5.1 thinking has no effort levels (toggle only).
-const GLM53: CatalogModel = {
-  id: "glm-5.3",
+// Fixture mirrors the live glm-5.3 catalog entry (2026-08): glm-5.3 advertises
+// thinking tiers, glm-5.1 thinking has no effort levels (toggle only).
+const GLM53: CatalogModel = catalogModel("glm-5.3", {
   name: "GLM 5.3",
   created: 1787929200,
-  family: "glm-5.3",
   capabilities: { tools: true, thinking: true, vision: false },
-  input: ["text"],
   context: 1048576,
   maxOutput: 131072,
   reasoningOptions: ["low", "high", "max"],
   releaseDate: "2026-08-14",
-}
+})
 
 const GLM51: CatalogModel = { ...GLM53, id: "glm-5.1", reasoningOptions: [] }
 
@@ -82,5 +81,28 @@ describe("toModelV2 pricing", () => {
   test("models without pricing data stay at $0 in both modes (no partial estimates)", () => {
     expect(toModelV2(PRICED, "reference").cost.input).toBe(0.075)
     expect(toModelV2(GLM53, "reference").cost).toEqual({ input: 0, output: 0, cache: { read: 0, write: 0 } })
+  })
+})
+
+// Stats knob (ticket 08): default ON, opt-out. In "off" the plugin must be
+// behavior-identical to pre-stats: no provider options.fetch, no event hook.
+describe("stats knob", () => {
+  const make = async (opts: Record<string, unknown>) => {
+    const plugin = await opencodeOllamaCloud({} as never, opts as never)
+    const cfg = { provider: {} as Record<string, Record<string, unknown>> }
+    await (plugin as any).config(cfg)
+    return { plugin, cfg }
+  }
+
+  test("default (on): inyecta fetch en el provider y registra el event sink", async () => {
+    const { plugin, cfg } = await make({})
+    expect((cfg.provider["ollama-cloud"].options as Record<string, unknown>).fetch).toBeTypeOf("function")
+    expect((plugin as any).event).toBeTypeOf("function")
+  })
+
+  test("stats: off — plugin reducido a provider/catálogo (cero overhead)", async () => {
+    const { plugin, cfg } = await make({ stats: "off" })
+    expect((cfg.provider["ollama-cloud"]).options).toBeUndefined()
+    expect((plugin as any).event).toBeUndefined()
   })
 })

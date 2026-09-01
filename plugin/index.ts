@@ -4,10 +4,15 @@ import {
   PROVIDER_CONFIG,
   PROVIDER_ID,
   loadCatalog,
-  type Catalog,
   type CatalogModel,
   type PluginOpts,
 } from "./catalog.ts"
+import { createStatsCapture, type FetchLike } from "./capture.ts"
+
+// Catalog models without pricing data and the models.dev passthrough share the
+// "zero reference cost" shape (opencode's CostV2, USD per 1M tokens). Factory,
+// not constant: a shared mutable object would alias every model's cost.
+const zeroCost = () => ({ input: 0, output: 0, cache: { read: 0, write: 0 } })
 
 const MODEL_OUTPUT_CAPS = {
   text: true,
@@ -58,11 +63,7 @@ export function toModelV2(m: CatalogModel, pricing: "off" | "reference" = "off")
       },
       output: MODEL_OUTPUT_CAPS,
     },
-    cost: {
-      input: ref ? ref.input : 0,
-      output: ref ? ref.output : 0,
-      cache: { read: 0, write: 0 },
-    },
+    cost: ref ? { ...zeroCost(), input: ref.input, output: ref.output } : zeroCost(),
     limit: {
       context: m.context,
       output: m.maxOutput,
@@ -82,28 +83,44 @@ export function toModelV2(m: CatalogModel, pricing: "off" | "reference" = "off")
   }
 }
 
-function toModels(catalog: Catalog, pricing: "off" | "reference"): Record<string, ModelV2> {
-  // Entries were already validated by isCatalog in loadCatalog/readCache.
-  const out: Record<string, ModelV2> = {}
-  for (const m of catalog.models) out[m.id] = toModelV2(m, pricing)
-  return out
-}
-
 const opencodeOllamaCloud: Plugin = async (_input, options) => {
   const pricing: "off" | "reference" = options?.pricing === "reference" ? "reference" : "off"
+  // Stats knob (ticket 08): default ON — opt-out, the mirror of pricing. In
+  // "off" the plugin behaves exactly as before the stats effort: no fetch
+  // wrap, no event sink, no handoff, zero overhead.
+  const stats: "on" | "off" = options?.stats === "off" ? "off" : "on"
   const opts: PluginOpts = {
     catalogUrl:
       typeof options?.catalogUrl === "string" ? options.catalogUrl : undefined,
     timeoutMs: typeof options?.timeoutMs === "number" ? options.timeoutMs : undefined,
-    pricing,
   }
 
   const { id: _id, ...providerConfig } = PROVIDER_CONFIG
+  // Stats capture (spec Pieza 1): wire wrapper for ollama-cloud + event sink.
+  // All failure paths live inside the capture; nothing here may throw.
+  // In "off" mode the capture is never created and the hooks below simply
+  // leave the plugin as it was before the stats effort.
+  const capture = stats === "on" ? createStatsCapture() : null
 
   return {
+    ...(capture
+      ? { event: ({ event }: { event: unknown }) => capture.handleEvent(event) }
+      : {}),
     config: async (cfg) => {
       cfg.provider ??= {}
-      cfg.provider[PROVIDER_ID] ??= { ...providerConfig }
+      const provider = (cfg.provider[PROVIDER_ID] ??= { ...providerConfig })
+      if (!capture) return
+      // opencode honors a provider `options.fetch` (its seam wraps it with
+      // timeouts and passes the signal through). We wrap AROUND any existing
+      // custom fetch (proxy/CA/agent) instead of clobbering it — only SSE
+      // chat calls get measured, everything else flows through untouched.
+      const providerWithOptions = provider as { options?: Record<string, unknown> }
+      const userFetch = (providerWithOptions.options?.fetch ?? null) as FetchLike | null
+      providerWithOptions.options = {
+        ...providerWithOptions.options,
+        fetch: (input: RequestInfo | URL, init?: RequestInit) =>
+          capture.wireFetch(input, init, userFetch ?? undefined),
+      }
     },
     provider: {
       id: PROVIDER_ID,
@@ -111,7 +128,9 @@ const opencodeOllamaCloud: Plugin = async (_input, options) => {
         try {
           const catalog = await loadCatalog(opts)
           if (catalog) {
-            const models = toModels(catalog, pricing)
+            // Entries were already validated by isCatalog in loadCatalog/readCache.
+            const models: Record<string, ModelV2> = {}
+            for (const m of catalog.models) models[m.id] = toModelV2(m, pricing)
             if (Object.keys(models).length > 0) return models
           }
           console.warn("[opencode-ollama-cloud] no usable catalog, falling back to models.dev models")
@@ -127,7 +146,7 @@ const opencodeOllamaCloud: Plugin = async (_input, options) => {
         // one later (cost here means the reference rate, not their number).
         const models: Record<string, ModelV2> = {}
         for (const [id, model] of Object.entries(provider.models))
-          models[id] = { ...model, cost: { input: 0, output: 0, cache: { read: 0, write: 0 } } }
+          models[id] = { ...model, cost: zeroCost() }
         return models
       },
     },

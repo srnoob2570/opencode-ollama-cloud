@@ -5,11 +5,27 @@ import {
   type Catalog as BaseCatalog,
   type CatalogModel,
 } from "../plugin/catalog.ts"
-import { resolveCatalog, type PricingOverrides } from "./resolve-catalog.ts"
+import {
+  MODELS_DEV_URL,
+  familyOf,
+  resolveCatalog,
+  tagOf,
+  type PricingOverrides,
+} from "./resolve-catalog.ts"
+import {
+  QUANT_UNKNOWN,
+  REGISTRY_BLOB_URL,
+  REGISTRY_MANIFEST_URL,
+  SHOW_URL,
+  cloudRefFor,
+  fileTypeFromBlob,
+  quantizationFromShow,
+  resolveQuantization,
+  type QuantizationResult,
+} from "./quantization.ts"
 
 const MODELS_API = "https://ollama.com/v1/models"
-const LIBRARY_URL = (base: string) => `https://ollama.com/library/${base}`
-const MODEL_SEED_URL = "https://models.dev/api.json"
+const LIBRARY_URL = (family: string) => `https://ollama.com/library/${family}`
 
 const CATALOG_PATH = new URL("../catalog/catalog.json", import.meta.url).pathname
 const OVERRIDES_PATH = new URL("../catalog/pricing-overrides.json", import.meta.url).pathname
@@ -48,13 +64,6 @@ export const titleCase = (base: string) =>
     )
     .join(" ")
 
-const baseOf = (id: string) => (id.includes(":") ? id.slice(0, id.indexOf(":")) : id)
-
-const hashOf = (models: OllamaModel[]) =>
-  createHash("sha256")
-    .update(models.map((m) => `${m.id}:${m.created}`).sort().join("|"))
-    .digest("hex")
-
 function fetchWithTimeout(url: string): Promise<Response> {
   return fetch(url, {
     headers: { "user-agent": "opencode-ollama-cloud-updater" },
@@ -62,6 +71,9 @@ function fetchWithTimeout(url: string): Promise<Response> {
   })
 }
 
+// CI-side fetch: fail loud (throw) so a broken endpoint blocks the update.
+// The plugin's fetchCatalogJson (plugin/catalog.ts) is intentionally the
+// opposite — best-effort, returns null — because the runtime must never throw.
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetchWithTimeout(url)
   if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`)
@@ -151,8 +163,7 @@ function buildSeedIndex(seed: Record<string, any>, providerIds?: string[]) {
     if (providerIds && !providerIds.includes(provId)) continue
     for (const [modelId, model] of Object.entries<any>(provider?.models ?? {})) {
       byId[modelId] ??= model
-      const base = modelId.split(":")[0]
-      byFamily[base] ??= model
+      byFamily[familyOf(modelId)] ??= model
     }
   }
   return { byId, byFamily }
@@ -203,17 +214,37 @@ async function loadCatalog(): Promise<Catalog> {
   return buildEmptyCatalog()
 }
 
+const MODES = ["check", "update"] as const
+type Mode = (typeof MODES)[number]
+
 async function main() {
-  const mode = process.argv[2] === "check" ? "check" : "update"
+  // Strict CLI: previously any unknown argument silently ran a full "update"
+  // (scrape + atomic write). A typo like `chek` must fail, not publish.
+  const args = process.argv.slice(2)
+  const knownArgs = new Set<string>([...MODES, "--force"])
+  const unknown = args.filter((a) => !knownArgs.has(a))
+  // Deduped: a repeated identical mode (check check) is accepted, as the old
+  // lax parser did; only genuinely conflicting modes are an error.
+  const modes = [...new Set(args.filter((a): a is Mode => (MODES as readonly string[]).includes(a)))]
+  if (unknown.length > 0 || modes.length > 1) {
+    if (unknown.length > 0) console.error(`unknown argument(s): ${unknown.join(", ")}`)
+    if (modes.length > 1) console.error(`conflicting modes: ${modes.join(", ")}`)
+    console.error("usage: bun scripts/update-catalog.ts [check|update] [--force]")
+    process.exit(1)
+  }
+  const mode = modes[0] ?? "update"
   // --force regenerates even when /v1/models is unchanged: used after changing
   // enrichment (e.g. adding pricing) so the hash gate doesn't hide the new data.
-  const force = process.argv.includes("--force")
+  const force = args.includes("--force")
+  if (mode === "check" && force) console.warn("warning: --force has no effect in check mode")
 
   const api = await fetchJson<{ data: OllamaModel[] }>(MODELS_API)
   const live = api.data
   if (!live?.length) throw new Error("ollama.com/v1/models returned no models")
 
-  const liveHash = hashOf(live)
+  const liveHash = createHash("sha256")
+    .update(live.map((m) => `${m.id}:${m.created}`).sort().join("|"))
+    .digest("hex")
   const catalog = await loadCatalog()
 
   if (mode === "check") {
@@ -240,7 +271,7 @@ async function main() {
   }
   if (stale) console.log("catalog stale; forcing refresh")
 
-  const seed = await fetchJson<Record<string, any>>(MODEL_SEED_URL).catch(() => ({}))
+  const seed = await fetchJson<Record<string, any>>(MODELS_DEV_URL).catch(() => ({}))
   // The seed carries maxOutput, reasoningOptions, releaseDate and the
   // first-party pricing rule. An empty seed (transient models.dev outage)
   // would publish a silently regressed catalog — context windows stay but
@@ -249,29 +280,29 @@ async function main() {
   if (!Object.keys(seed).length)
     throw new Error("models.dev seed is empty — aborting instead of publishing a regressed catalog")
 
-  const byBase = new Map<string, OllamaModel[]>()
+  const byFamily = new Map<string, OllamaModel[]>()
   for (const m of live) {
-    const base = baseOf(m.id)
-    byBase.set(base, [...(byBase.get(base) ?? []), m])
+    const family = familyOf(m.id)
+    byFamily.set(family, [...(byFamily.get(family) ?? []), m])
   }
 
   const cache = new Map<string, Awaited<ReturnType<typeof parseLibraryPage>>>()
   // Previous rows per family, keyed per id: on scrape failure each tag restores
   // its own specs instead of one family-wide value.
-  const prevByBase = new Map<string, CatalogModel[]>()
+  const prevByFamily = new Map<string, CatalogModel[]>()
   for (const m of catalog.models)
-    prevByBase.set(m.family, [...(prevByBase.get(m.family) ?? []), m])
+    prevByFamily.set(m.family, [...(prevByFamily.get(m.family) ?? []), m])
   const models: CatalogModel[] = []
 
   // Scrape library pages with bounded concurrency instead of strictly sequentially.
-  const bases = [...byBase.keys()]
+  const families = [...byFamily.keys()]
   const SCRAPE_CONCURRENCY = 5
   let cursor = 0
   await Promise.all(
-    Array.from({ length: Math.min(SCRAPE_CONCURRENCY, bases.length) }, async () => {
-      while (cursor < bases.length) {
-        const base = bases[cursor++]
-        const html = await fetchWithTimeout(LIBRARY_URL(base))
+    Array.from({ length: Math.min(SCRAPE_CONCURRENCY, families.length) }, async () => {
+      while (cursor < families.length) {
+        const family = families[cursor++]
+        const html = await fetchWithTimeout(LIBRARY_URL(family))
           .then((r) => (r.ok ? r.text() : ""))
           .catch(() => "")
         const parsed = parseLibraryPage(html)
@@ -279,10 +310,10 @@ async function main() {
         // context line matches, so context stays 0) are the same failure mode:
         // never let either regress the catalog to context: 0 + no capabilities.
         const scrapeFailed = html === "" || parsed.context === 0
-        if (scrapeFailed && prevByBase.has(base)) {
+        if (scrapeFailed && prevByFamily.has(family)) {
           // Keep previous values so a refresh can't regress the catalog. Restored
           // under the exact row id, which is the first key cardFor() tries.
-          const prev = prevByBase.get(base)!
+          const prev = prevByFamily.get(family)!
           for (const row of prev)
             parsed.variants.set(row.id, { context: row.context, input: [...row.input] })
           parsed.capabilities = prev[0].capabilities
@@ -293,28 +324,28 @@ async function main() {
           // than write a catalog that violates the schema (context minimum 1).
           // CI fails loudly and the next scheduled run retries.
           throw new Error(
-            `failed to scrape "ollama.com/library/${base}" (no context window found, no previous data to keep)`,
+            `failed to scrape "ollama.com/library/${family}" (no context window found, no previous data to keep)`,
           )
         }
-        cache.set(base, parsed)
+        cache.set(family, parsed)
       }
     }),
   )
 
-  for (const [base, variants] of byBase) {
-    const parsed = cache.get(base)!
+  for (const [family, variants] of byFamily) {
+    const parsed = cache.get(family)!
 
     for (const variant of variants) {
-      const tag = variant.id.includes(":") ? variant.id.split(":")[1] : ""
+      const tag = tagOf(variant.id)
       // Prefer the tag's own card over the family default — the first info
       // line on the page describes the default tag only, and other tags can
       // differ (gemma4:latest is 128K while gemma4:12b..:31b are 256K).
       const card = cardFor(parsed, variant.id)
       models.push({
         id: variant.id,
-        name: titleCase(base) + (tag ? ` (${tag})` : ""),
+        name: titleCase(family) + (tag ? ` (${tag})` : ""),
         created: variant.created,
-        family: base,
+        family,
         capabilities: parsed.capabilities,
         input: card?.input ?? parsed.input,
         context: card?.context ?? parsed.context,
@@ -334,6 +365,8 @@ async function main() {
   })
   for (const w of resolved.warnings) console.warn(`warning: ${w}`)
 
+  const quantized = await enrichQuantization(resolved.models, catalog)
+
   const next: Catalog = {
     ...catalog,
     generatedAt: new Date().toISOString(),
@@ -342,14 +375,17 @@ async function main() {
     // timestamp (gpt-oss:120b/:20b); the id tiebreak keeps regenerations of an
     // unchanged model list from producing a reordered — and thus "changed" —
     // catalog.
-    models: resolved.models.sort((a, b) => b.created - a.created || a.id.localeCompare(b.id)),
+    models: quantized
+      .sort((a, b) => b.created - a.created || a.id.localeCompare(b.id)),
   }
 
   // Atomic: a torn write must never leave a half-catalog that wedges every
   // subsequent `update` and `check` run.
   await Bun.write(CATALOG_PATH + ".tmp", JSON.stringify(next, null, 2) + "\n")
   await rename(CATALOG_PATH + ".tmp", CATALOG_PATH)
-  console.log(`catalog updated: ${resolved.models.length} models, ${byBase.size} bases scraped, ${resolved.warnings.length} pricing warnings`)
+  console.log(
+    `catalog updated: ${quantized.length} models, ${byFamily.size} families scraped, ${resolved.warnings.length} pricing warnings, ${quantized.filter((m) => m.quantization === QUANT_UNKNOWN).length} quantization unknown`,
+  )
 }
 
 // Guarded so tests and the validator can import pure functions (parseLibraryPage,
@@ -359,4 +395,80 @@ if (import.meta.main) {
     console.error(err)
     process.exit(1)
   })
+}
+
+// Quantization enrichment (ticket 06): registry manifest <ref>-cloud → config
+// blob as primary source, POST /api/show as witness. CI advises (warnings),
+// never fails: an unreachable registry leaves the previous catalog value
+// intact via resolveQuantization's outage policy.
+const QUANT_CONCURRENCY = 6
+
+async function enrichQuantization(models: CatalogModel[], previous: Catalog): Promise<CatalogModel[]> {
+  const prevById = new Map(previous.models.map((m) => [m.id, m]))
+  const slots = new Array<QuantizationResult>(models.length)
+  let cursor = 0
+  await Promise.all(
+    Array.from({ length: Math.min(QUANT_CONCURRENCY, models.length) }, async () => {
+      while (cursor < models.length) {
+        const index = cursor++
+        const model = models[index]
+        const prevRow = prevById.get(model.id)
+        let registry: string | null = null
+        let registryFailed = false
+        try {
+          const manifest = await fetchJson<{ config?: { digest?: string } }>(
+            REGISTRY_MANIFEST_URL(model.family, cloudRefFor(model.id)),
+          )
+          const digest = manifest?.config?.digest
+          if (typeof digest === "string" && digest.length > 0) {
+            const blob = await fetchJson<unknown>(REGISTRY_BLOB_URL(model.family, digest))
+            registry = fileTypeFromBlob(blob)
+          }
+        } catch {
+          registryFailed = true
+        }
+        let show: string | null = null
+        try {
+          const res = await fetch(SHOW_URL, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "user-agent": "opencode-ollama-cloud-updater",
+            },
+            body: JSON.stringify({ model: model.id }),
+            signal: AbortSignal.timeout(20_000),
+          })
+          if (res.ok) show = quantizationFromShow(await res.json())
+        } catch {
+          /* witness unavailable — no conflict, just no second voice */
+        }
+        slots[index] = resolveQuantization({
+          id: model.id,
+          registry,
+          registryFailed,
+          show,
+          previous: prevRow?.quantization ?? null,
+        })
+      }
+    }),
+  )
+
+  const warnings: string[] = []
+  const enriched = models.map((m, index) => {
+    const q = slots[index] ?? { quantization: QUANT_UNKNOWN, source: "sin fuente defendible" }
+    if (q.conflict)
+      warnings.push(
+        `${m.id}: quantization conflict — registry ${String(q.conflict.registry)} vs /api/show ${String(q.conflict["api/show"])} (registry wins)`,
+      )
+    if (q.warning)
+      warnings.push(`${q.warning}: registry file_type came back empty — keeping the previous catalog value (check for an Ollama-side change)`)
+    return {
+      ...m,
+      quantization: q.quantization,
+      sources: { ...m.sources, quantization: q.source },
+      ...(q.conflict ? { conflicts: { ...m.conflicts, quantization: q.conflict } } : {}),
+    }
+  })
+  for (const w of warnings) console.warn(`warning: ${w}`)
+  return enriched
 }

@@ -9,13 +9,15 @@ import type { CatalogModel, ModelPricing } from "../plugin/catalog.ts"
 
 export const MODELS_DEV_URL = "https://models.dev/api.json"
 
-export interface OverrideEntry {
+// Canonical split of a model id `family[:tag]` (CONTEXT.md: "family" is the
+// term; never "base"). Shared by resolve- and update-catalog.
+export const familyOf = (id: string) => id.split(":")[0]
+export const tagOf = (id: string) => (id.includes(":") ? id.split(":")[1] : "")
+
+// Meta fields are ModelPricing's verbatim — kept in sync structurally, not by hand.
+export interface OverrideEntry extends Pick<ModelPricing, "provider" | "source" | "asOf" | "note"> {
   input: number
   output: number
-  provider?: string
-  source?: string
-  asOf?: string
-  note?: string
 }
 
 export type PricingOverrides = Record<string, OverrideEntry>
@@ -57,6 +59,9 @@ const UPSTREAM_ALIASES: Record<string, string> = {
   "minimax-m2.7": "MiniMax-M2.7",
 }
 
+// Pricing invariant: positive finite input/output. The same rule is enforced
+// by isCatalog (plugin/catalog.ts) and catalog.schema.json (exclusiveMinimum
+// 0) — keep all three in sync.
 const realCost = (cost: any): { input: number; output: number } | undefined =>
   typeof cost?.input === "number" &&
   typeof cost?.output === "number" &&
@@ -66,8 +71,7 @@ const realCost = (cost: any): { input: number; output: number } | undefined =>
     : undefined
 
 const keysFor = (id: string): string[] => {
-  const base = id.split(":")[0]
-  return [...new Set([UPSTREAM_ALIASES[id], id, base].filter(
+  return [...new Set([UPSTREAM_ALIASES[id], id, familyOf(id)].filter(
     (k): k is string => typeof k === "string",
   ))]
 }
@@ -99,8 +103,7 @@ function firstPartyCost(
   seed: Record<string, any>,
   id: string,
 ): { provider: string; input: number; output: number } | undefined {
-  const base = id.split(":")[0]
-  const provider = firstPartyProviderFor(base)
+  const provider = firstPartyProviderFor(familyOf(id))
   if (!provider) return undefined
   const pick = pickCost(seed[provider]?.models ?? {}, id)
   return pick ? { provider, ...pick } : undefined
@@ -139,9 +142,12 @@ function marketCost(
   return best?.cost
 }
 
-// A malformed override must never poison the catalog: isCatalog rejects the
-// whole catalog when a pricing block carries a non-string provider/source.
-// Malformed entries are ignored (with a warning) instead of trusted verbatim.
+// A malformed override must never poison the catalog: this guard is the real
+// net — isCatalog (plugin/catalog.ts) only checks input/output/unit, so the
+// string-typed meta checks below are NOT redundant. Malformed entries are
+// ignored (with a warning) instead of trusted verbatim.
+// The positive-finite input/output checks mirror realCost above and the same
+// invariant in isCatalog (plugin/catalog.ts) / catalog.schema.json.
 function isOverride(v: unknown): v is OverrideEntry {
   if (typeof v !== "object" || v === null) return false
   const o = v as OverrideEntry

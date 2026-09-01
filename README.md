@@ -92,6 +92,36 @@ Prefer editing the config yourself? Add the plugin to `~/.config/opencode/openco
 
 The catalog ships a **reference price** per model — the upstream API rate in USD per 1M tokens, built automatically from models.dev first-party entries and correctable in `catalog/pricing-overrides.json` (overrides win; disagreements with the seed are recorded in the catalog's `conflicts`). These are reference prices, **not billing**: your ollama.com plan doesn't charge per use, and the real token rate is only visible in your ollama.com panel. Models without pricing data stay at $0 (no partial estimates).
 
+## Streaming stats and the model card
+
+The plugin measures what opencode doesn't: **TTFT** (time to first token) and **tokens/s** of every LLM step, client-side — wire-accurate for `ollama-cloud` (the plugin wraps the provider's `fetch` and reads the final `usage` chunk opencode already requests), event-derived for any other provider. It shows a live session average — **the metrics belong to the session, not the current model** (no per-model breakdown, no reset when you switch models) — next to the token counter:
+
+```
+12.4k tokens (23%) · $0.02 · 38.2 tok/s · TTFT 380 ms · Session average
+```
+
+- `/stats` — session summary plus the latest responses (step-level detail; `wire` vs `event` rows are distinguishable).
+- `/model` — model card of the active model: quantization, family, capabilities, limits, release date and the reference price (when `pricing: "reference"`).
+
+The average only counts the **main conversation**: subagents, title generation and compaction never enter it (measured signals verified against opencode's source). Numbers are in-memory per session — nothing is stored, and nothing is sent anywhere. The stats UI ships as a second plugin entry and degrades silently: on an opencode the TUI API moved in, the provider/catalog keep working and stats simply vanish (tested against opencode **1.18.25**; the plugin API it uses is present-but-undocumented there, so treat stats UI as best-effort until upstream documents it).
+
+```json
+{
+  "plugin": [
+    ["@srnoob2570/opencode-ollama-cloud", { "pricing": "reference" }],
+    ["@srnoob2570/opencode-ollama-cloud/tui", {}]
+  ]
+}
+```
+
+- `stats`: `"on"` (default) or `"off"` — set it on **both** entries turns everything off: no measurement, no UI, exactly yesterday's plugin.
+
+### Quantization disclosure
+
+The model card's **quantization** is the value Ollama **declares** for the model it serves (registry `file_type`, cross-checked against `/api/show`), researched per model and carried in the catalog — it does **not** guarantee the precision the remote inference actually runs at. Models without a defensible public source say `desconocida` (they are never guessed), and models outside the catalog show `—`.
+
+Credit where it's due: the streaming-stats idea was proposed by GitHub user **[@adilfaisal01](https://github.com/adilfaisal01)**.
+
 ## Development
 
 ```bash

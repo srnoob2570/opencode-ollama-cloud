@@ -4,3 +4,6 @@ node_modules/
 # wayfinding maps y research local del repo (no se publican)
 wayfinder/
 research/
+.scratch/
+# Bun es el gestor del repo; un package-lock.json npm local nunca debe colarse
+package-lock.json
