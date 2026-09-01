@@ -87,15 +87,17 @@ Prefer editing the config yourself? Add the plugin to `~/.config/opencode/openco
 
 - `catalogUrl`: alternative catalog URL (tried first).
 - `timeoutMs`: per-fetch timeout (default `5000`).
-- `pricing`: `"off"` (default) or `"reference"` — whether opencode's session cost counter shows the catalog's reference prices.
+- `pricing`: `"on"` (default) or `"off"` — whether opencode's session cost counter shows the official Ollama Cloud rate. `pricing: "reference"` (the old opt-in value) still works and means `"on"`.
 
 ```json
 {
-  "plugin": [["@srnoob2570/opencode-ollama-cloud", { "pricing": "reference" }]]
+  "plugin": [["@srnoob2570/opencode-ollama-cloud", { "pricing": "off" }]]
 }
 ```
 
-The catalog ships a **reference price** per model — the upstream API rate in USD per 1M tokens, built automatically from models.dev first-party entries and correctable in `catalog/pricing-overrides.json` (overrides win; disagreements with the seed are recorded in the catalog's `conflicts`). These are reference prices, **not billing**: your ollama.com plan doesn't charge per use, and the real token rate is only visible in your ollama.com panel. Models without pricing data stay at $0 (no partial estimates).
+The catalog ships the **official Ollama Cloud rate** per model — input, cached-input and output prices in USD per 1M tokens, straight from Ollama's public [rate card](https://ollama.com/pricing) in `catalog/pricing.json`. This is what your credits actually pay per token, so opencode's cost counter shows it by default (opt-out: `pricing: "off"` turns it off). Models without a rate stay at $0 (no partial estimates).
+
+Refreshing the table is a **manual workflow**: run `bun run update-pricing` and it fetches the live rate card, prints a rate-by-rate diff and rewrites `catalog/pricing.json`. If the page and the catalog disagree (a new or retired model), it aborts with a report and writes nothing. The automated catalog update never touches pricing.
 
 ## Streaming stats and the model card
 
@@ -106,14 +108,14 @@ The plugin measures what opencode doesn't: **TTFT** (time to first token) and **
 ```
 
 - `/stats` — session summary plus the latest responses (step-level detail; `wire` vs `event` rows are distinguishable).
-- `/model` — model card of the active model: quantization, family, capabilities, limits, release date and the reference price (when `pricing: "reference"`).
+- `/model` — model card of the active model: quantization, family, capabilities, limits, release date and the official rate (input · cached input · output per 1M; unless `pricing: "off"`).
 
 The average only counts the **main conversation**: subagents, title generation and compaction never enter it (measured signals verified against opencode's source). Numbers are in-memory per session — nothing is stored, and nothing is sent anywhere. The stats UI ships as a second plugin entry and degrades silently: on an opencode the TUI API moved in, the provider/catalog keep working and stats simply vanish (tested against opencode **1.18.25**; the plugin API it uses is present-but-undocumented there, so treat stats UI as best-effort until upstream documents it).
 
 ```json
 {
   "plugin": [
-    ["@srnoob2570/opencode-ollama-cloud", { "pricing": "reference" }],
+    ["@srnoob2570/opencode-ollama-cloud", {}],
     ["@srnoob2570/opencode-ollama-cloud/tui", {}]
   ]
 }

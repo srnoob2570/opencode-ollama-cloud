@@ -1,13 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import {
   EMPTY_SESSION_LINE,
+  configuredCatalogUrl,
   formatLiveLine,
   formatModelCard,
   formatRelativeAge,
   formatStatsDialogBody,
   formatStepRow,
   pickTuiFeatures,
-  referencePricingActive,
+  pricingActive,
+  pricingKnob,
 } from "./tui-display.ts";
 import type { SessionSummary, StepMeasurement } from "./stats.ts";
 
@@ -98,17 +100,33 @@ describe("ficha /model (mock §3 — tres estados de cuantización)", () => {
     context: 1_048_576,
     maxOutput: 131_072,
     capabilities: { tools: true, thinking: true, vision: false },
-    pricing: { input: 0.7, output: 1.75 },
+    pricing: { input: 0.7, output: 1.75, cachedInput: 0.02 },
     ...over,
   });
 
-  test("cuantización declarada + nota al pie + precio según knob", () => {
+  test("cuantización declarada + nota al pie + tarifa oficial según knob", () => {
     const card = formatModelCard(model(), true);
     expect(card).toContain("FP8 (declared)");
     expect(card).toContain("quantization declared by Ollama. Does not");
     expect(card).toContain("1M");
+    expect(card).toContain(
+      "Official rate     $0.7 in · $0.02 cached · $1.75 out per 1M",
+    );
     const off = formatModelCard(model(), false);
-    expect(off).not.toContain("Ref. price");
+    expect(off).not.toContain("Official rate");
+  });
+
+  test("sin cachedInput la columna se muestra como —, nunca inventa", () => {
+    const noCache = model({ pricing: { input: 0.7, output: 1.75 } });
+    expect(formatModelCard(noCache, true)).toContain(
+      "Official rate     $0.7 in · — cached · $1.75 out per 1M",
+    );
+  });
+
+  test("fuera de catálogo (pricing null) → guiones, nunca 0", () => {
+    expect(formatModelCard(model({ pricing: null }), true)).toContain(
+      "Official rate     — in · — cached · — out per 1M",
+    );
   });
 
   test("sin fuente defendible → desconocida; fuera de catálogo → —", () => {
@@ -140,31 +158,91 @@ describe("pickTuiFeatures (degradación silenciosa)", () => {
   });
 });
 
-describe("referencePricingActive (el knob vive en la entrada server)", () => {
-  test("descubre pricing: reference en CUALQUIER entrada del paquete", () => {
+describe("pricingKnob (la regla solo-off vive en UN lado, code review)", () => {
+  test("solo el literal off apaga; legacy reference y desconocidos quedan en on", () => {
+    expect(pricingKnob(undefined)).toBe("on");
+    expect(pricingKnob("reference")).toBe("on");
+    expect(pricingKnob("off")).toBe("off");
+  });
+});
+
+describe("configuredCatalogUrl (la ficha usa las mismas puertas que el server)", () => {
+  test("toma el catalogUrl de la propia entrada TUI", () => {
+    expect(
+      configuredCatalogUrl(
+        { plugin: [] },
+        { catalogUrl: "https://x/cat.json" },
+      ),
+    ).toBe("https://x/cat.json");
+  });
+
+  test("escanea el catalogUrl configurado en la entrada server", () => {
     const config = {
       plugin: [
-        ["@srnoob2570/opencode-ollama-cloud", { pricing: "reference" }],
+        [
+          "@srnoob2570/opencode-ollama-cloud",
+          { catalogUrl: "https://y/cat.json" },
+        ],
         ["@srnoob2570/opencode-ollama-cloud/tui", {}],
       ],
     };
-    expect(referencePricingActive(config, {})).toBe(true);
+    expect(configuredCatalogUrl(config, {})).toBe("https://y/cat.json");
   });
 
-  test("lo respeta también si el usuario lo puso en la entrada TUI", () => {
+  test("ignora catalogUrl de otros paquetes y valores no-string", () => {
+    const config = {
+      plugin: [["otro-plugin", { catalogUrl: "https://z/cat.json" }]],
+    };
+    expect(configuredCatalogUrl(config, {})).toBeUndefined();
     expect(
-      referencePricingActive({ plugin: [] }, { pricing: "reference" }),
-    ).toBe(true);
-  });
-
-  test("config sin el knob ni el plugin → false", () => {
-    expect(referencePricingActive(undefined, {})).toBe(false);
-    expect(
-      referencePricingActive(
-        { plugin: ["@srnoob2570/opencode-ollama-cloud"] },
+      configuredCatalogUrl(
+        {
+          plugin: [["@srnoob2570/opencode-ollama-cloud", { catalogUrl: 42 }]],
+        },
         {},
       ),
-    ).toBe(false);
+    ).toBeUndefined();
+  });
+
+  test("sin configuración → undefined (mirrors por defecto)", () => {
+    expect(configuredCatalogUrl(undefined, {})).toBeUndefined();
+    expect(configuredCatalogUrl({ plugin: [] }, {})).toBeUndefined();
+  });
+});
+
+describe("pricingActive (opt-out: on por defecto, solo `off` apaga)", () => {
+  test("default on sin config ni opciones (la tarifa es oficial, no pide permiso)", () => {
+    expect(pricingActive(undefined, {})).toBe(true);
+    expect(pricingActive({ plugin: [] }, undefined)).toBe(true);
+  });
+
+  test("pricing: off en la entrada TUI apaga", () => {
+    expect(pricingActive({ plugin: [] }, { pricing: "off" })).toBe(false);
+  });
+
+  test("pricing: off en CUALQUIER entrada del paquete apaga", () => {
+    const config = {
+      plugin: [
+        ["@srnoob2570/opencode-ollama-cloud", { pricing: "off" }],
+        ["@srnoob2570/opencode-ollama-cloud/tui", {}],
+      ],
+    };
+    expect(pricingActive(config, {})).toBe(false);
+  });
+
+  test("el alias legacy `reference` y los valores desconocidos NO apagan", () => {
+    const config = {
+      plugin: [["@srnoob2570/opencode-ollama-cloud", { pricing: "reference" }]],
+    };
+    expect(pricingActive(config, {})).toBe(true);
+    expect(pricingActive({ plugin: [] }, { pricing: "reference" })).toBe(true);
+  });
+
+  test("otro paquete con pricing: off no apaga el nuestro", () => {
+    const config = {
+      plugin: [["otro-plugin", { pricing: "off" }]],
+    };
+    expect(pricingActive(config, {})).toBe(true);
   });
 });
 describe("ficha /model — cuantización implícita no es «declarada» (code review)", () => {

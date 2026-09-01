@@ -10,15 +10,21 @@
 // separate modules in separate processes, sharing ONLY the handoff file.
 import { createSignal } from "solid-js";
 import {
+  configuredCatalogUrl,
   formatLiveLine,
   formatModelCard,
   formatStatsDialogBody,
   pickTuiFeatures,
-  referencePricingActive,
+  pricingActive,
   type ModelCard,
 } from "./tui-display.ts";
 import { createHandoffStore, type HandoffFile } from "./handoff.ts";
-import { loadCatalog, type Catalog as CatalogModel2 } from "./catalog.ts";
+import {
+  loadCatalog,
+  loadPricing,
+  type Catalog as CatalogModel2,
+  type PricingTable,
+} from "./catalog.ts";
 import type { SessionSummary } from "./stats.ts";
 import { appendFileSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { DEFAULT_HANDOFF_DIR } from "./handoff.ts";
@@ -111,7 +117,11 @@ const sessionFile = async (): Promise<HandoffFile | null> => {
 };
 
 // /model consults the catalog; memoize the promise (TTL) so opening the
-// dialog never races the CDN mirrors every time
+// dialog never races the CDN mirrors every time. The catalogUrl is the one
+// the user configured (either entry — same doors as the server entry), set
+// once at module entry; a custom catalog rides with NO rate table (the
+// rateless contract) instead of mixing our rates into its ids.
+let catalogUrl: string | undefined;
 let catalogCache: {
   at: number;
   promise: Promise<CatalogModel2 | null>;
@@ -120,10 +130,26 @@ const catalogOnce = (): Promise<CatalogModel2 | null> => {
   if (!catalogCache || Date.now() - catalogCache.at > 60_000) {
     catalogCache = {
       at: Date.now(),
-      promise: loadCatalog({}).catch(() => null),
+      promise: loadCatalog({ catalogUrl }).catch(() => null),
     };
   }
   return catalogCache.promise;
+};
+
+// The official-rate table joins the catalog for the /model card; memoized on
+// the same TTL and equally best-effort (no table → the card shows dashes).
+let pricingCache: {
+  at: number;
+  promise: Promise<PricingTable | null>;
+} | null = null;
+const pricingOnce = (): Promise<PricingTable | null> => {
+  if (!pricingCache || Date.now() - pricingCache.at > 60_000) {
+    pricingCache = {
+      at: Date.now(),
+      promise: loadPricing({ catalogUrl }).catch(() => null),
+    };
+  }
+  return pricingCache.promise;
 };
 
 const showStats = async (api: TuiLike): Promise<void> => {
@@ -160,7 +186,10 @@ const showModel = async (api: TuiLike, pricingOn: boolean): Promise<void> => {
     let title = "/model";
     if (modelID) {
       try {
-        const catalog = await catalogOnce();
+        const [catalog, rates] = await Promise.all([
+          catalogOnce(),
+          pricingOnce(),
+        ]);
         const model: CatalogModel2["models"][number] | undefined =
           catalog?.models.find((m) => m.id === modelID);
         if (model) {
@@ -174,7 +203,7 @@ const showModel = async (api: TuiLike, pricingOn: boolean): Promise<void> => {
             context: model.context,
             maxOutput: model.maxOutput,
             capabilities: model.capabilities,
-            pricing: model.pricing ?? null,
+            pricing: rates?.[model.id] ?? null,
           };
           body = formatModelCard(card, pricingOn);
         } else {
@@ -205,7 +234,14 @@ const showModel = async (api: TuiLike, pricingOn: boolean): Promise<void> => {
 
 export default {
   id: "opencode-ollama-cloud-tui",
-  async tui(api: TuiLike, options?: { stats?: string; pricing?: string }) {
+  async tui(
+    api: TuiLike,
+    options?: {
+      stats?: string;
+      pricing?: string;
+      catalogUrl?: string;
+    },
+  ) {
     debug(
       "tui module entry, version",
       String((api as { app?: { version?: string } }).app?.version ?? "?"),
@@ -216,6 +252,11 @@ export default {
         debug("stats off — retiring before any registration");
         return;
       }
+      // Same doors as the server entry: a configured catalogUrl (own options
+      // or the server entry's) replaces the default mirrors for /model.
+      catalogUrl = configuredCatalogUrl(api.state?.config, {
+        catalogUrl: options?.catalogUrl,
+      });
       const features: { slots: boolean; keymap: boolean } =
         pickTuiFeatures(api);
       debug("features:", JSON.stringify(features));
@@ -306,7 +347,7 @@ export default {
 
       if (features.keymap) {
         // the pricing knob lives on the server entry (README) — scan config
-        const pricingOn = referencePricingActive(api.state?.config, {
+        const pricingOn = pricingActive(api.state?.config, {
           pricing: options?.pricing,
         });
         api.keymap.registerLayer({

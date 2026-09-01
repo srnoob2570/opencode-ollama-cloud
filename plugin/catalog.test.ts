@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { catalogModel, catalogWith } from "../scripts/test-fixtures.ts";
-import { isCatalog } from "./catalog.ts";
+import {
+  catalogModel,
+  catalogWith,
+  pricingRate,
+} from "../scripts/test-fixtures.ts";
+import {
+  isCatalog,
+  isPricingTable,
+  pricingCoverageProblems,
+  type PricingRate,
+} from "./catalog.ts";
 
 describe("isCatalog", () => {
   const validModel = catalogModel("gpt-oss:120b", {
@@ -43,10 +52,11 @@ describe("isCatalog", () => {
   });
 });
 
-// Optional pricing/provenance blocks: catalogs without them (old versions)
-// stay valid; catalogs with them must carry the right shape so garbage
-// prices never reach the plugin's cost mapping.
-describe("isCatalog optional pricing blocks", () => {
+// Pricing is NOT part of the catalog contract anymore: the official rate
+// card (catalog/pricing.json) is its own contract side (isPricingTable). A
+// foreign or old catalog carrying embedded pricing still loads — the extra
+// field is ignored, the plugin only joins the table.
+describe("isCatalog pricing is not the catalog's business", () => {
   const validModel = catalogModel("glm-5.3-flash", {
     name: "GLM 5.3 Flash",
     created: 1787929200,
@@ -56,43 +66,22 @@ describe("isCatalog optional pricing blocks", () => {
     maxOutput: 131072,
   });
 
-  test("absent blocks pass (old catalogs load unchanged)", () => {
-    expect(isCatalog(catalogWith([validModel]))).toBe(true);
+  test("old catalogs with embedded pricing still load (extra field ignored)", () => {
+    expect(
+      isCatalog(
+        catalogWith([
+          { ...validModel, pricing: { input: 0.075, output: 0.25 } },
+        ]),
+      ),
+    ).toBe(true);
   });
 
-  test("well-shaped pricing passes", () => {
-    const withPricing = {
-      ...validModel,
-      pricing: {
-        input: 0.075,
-        output: 0.25,
-        unit: "per-1M",
-        provider: "zai",
-        source: "https://x",
-        asOf: "2026-08-30",
-      },
-    };
-    expect(isCatalog(catalogWith([withPricing]))).toBe(true);
-  });
-
-  test("garbage pricing is rejected (wrong unit, non-numeric costs)", () => {
-    const badUnit = {
-      ...validModel,
-      pricing: { ...validModel, input: 1, output: 1, unit: "per-token" },
-    };
-    const badNumbers = {
-      ...validModel,
-      pricing: {
-        input: "0.075",
-        output: 0.25,
-        unit: "per-1M",
-        provider: "zai",
-        source: "https://x",
-        asOf: "2026-08-30",
-      },
-    };
-    expect(isCatalog(catalogWith([badUnit]))).toBe(false);
-    expect(isCatalog(catalogWith([badNumbers]))).toBe(false);
+  test("a catalog with garbage embedded pricing still loads (never consulted)", () => {
+    expect(
+      isCatalog(
+        catalogWith([{ ...validModel, pricing: { input: "x", output: -1 } }]),
+      ),
+    ).toBe(true);
   });
 });
 
@@ -128,28 +117,101 @@ describe("isCatalog optional quantization", () => {
   });
 });
 
-describe("isCatalog pricing compat (code review fixes)", () => {
-  const validModel = catalogModel("kimi-k3", {
-    name: "Kimi K3",
-    context: 1024 * 1024,
-    maxOutput: 131072,
+// The pricing table (catalog/pricing.json) is its own contract side: the
+// plugin joins it by model id, so a malformed entry must never reach the
+// cost counter (same policy as isCatalog: loader checks shape, schema is
+// the published stricter contract).
+describe("isPricingTable", () => {
+  test("accepts a well-formed table", () => {
+    expect(isPricingTable({ "kimi-k3": pricingRate() })).toBe(true);
   });
 
-  test("a foreign catalog with models.dev-shaped pricing ({input, output}) still loads", () => {
+  test("accepts the $schema pointer (metadata, not an entry)", () => {
     expect(
-      isCatalog(
-        catalogWith([{ ...validModel, pricing: { input: 0.2, output: 0.7 } }]),
-      ),
+      isPricingTable({
+        $schema: "./pricing.schema.json",
+        "kimi-k3": pricingRate(),
+      }),
     ).toBe(true);
   });
 
-  test("negative, NaN and Infinity prices are rejected", () => {
-    const bad = [
-      { input: -5, output: 2 },
-      { input: Number.NaN, output: 2 },
-      { input: 1e999, output: 2 },
-    ];
-    for (const pricing of bad)
-      expect(isCatalog(catalogWith([{ ...validModel, pricing }]))).toBe(false);
+  test("rejects non-objects and arrays", () => {
+    expect(isPricingTable(null)).toBe(false);
+    expect(isPricingTable("table")).toBe(false);
+    expect(isPricingTable([pricingRate()])).toBe(false);
+  });
+
+  test("rejects zero, negative, NaN and Infinity rates", () => {
+    for (const over of [
+      { input: 0 },
+      { input: -1 },
+      { output: Number.NaN },
+      { output: 1e999 },
+    ]) {
+      expect(isPricingTable({ "kimi-k3": pricingRate(over) })).toBe(false);
+    }
+  });
+
+  test("rejects a wrong unit and non-string meta", () => {
+    expect(
+      isPricingTable({
+        "kimi-k3": pricingRate({
+          unit: "per-token",
+        } as unknown as Partial<PricingRate>),
+      }),
+    ).toBe(false);
+    expect(
+      isPricingTable({
+        "kimi-k3": pricingRate({ asOf: 42 } as unknown as Partial<PricingRate>),
+      }),
+    ).toBe(false);
+  });
+
+  test("cachedInput is optional but must be finite and positive (schema parity)", () => {
+    const { cachedInput: _drop, ...noCache } = pricingRate();
+    expect(isPricingTable({ "kimi-k3": noCache })).toBe(true);
+    expect(
+      isPricingTable({ "kimi-k3": pricingRate({ cachedInput: -0.01 }) }),
+    ).toBe(false);
+    expect(isPricingTable({ "kimi-k3": pricingRate({ cachedInput: 0 }) })).toBe(
+      false,
+    );
+  });
+});
+
+// The coverage cross-check lives here (next to the contract it enforces) and
+// is shared by CI's validator and the manual update-pricing workflow — one
+// implementation, so the two can never drift apart (code-review finding).
+describe("pricingCoverageProblems (cobertura tabla ↔ catálogo)", () => {
+  test("tabla completa y sin huérfanos → vacío", () => {
+    const { orphanRates, missingRates } = pricingCoverageProblems(
+      { "kimi-k3": pricingRate() },
+      ["kimi-k3", "glm-5.3-flash"],
+    );
+    expect(orphanRates).toEqual([]);
+    expect(missingRates).toEqual([
+      'catalog model "glm-5.3-flash" has no rate on the pricing page (run bun run update-pricing)',
+    ]);
+  });
+
+  test("tarifa huérfana y modelo sin tarifa se reportan por separado", () => {
+    const { orphanRates, missingRates } = pricingCoverageProblems(
+      { "kimi-k99": pricingRate() },
+      ["kimi-k3"],
+    );
+    expect(orphanRates).toHaveLength(1);
+    expect(orphanRates[0]).toContain("kimi-k99");
+    expect(missingRates).toHaveLength(1);
+    expect(missingRates[0]).toContain("kimi-k3");
+  });
+
+  test("el puntero $schema nunca es una tarifa huérfana", () => {
+    const table = JSON.parse(
+      JSON.stringify({
+        $schema: "./pricing.schema.json",
+        "kimi-k3": pricingRate(),
+      }),
+    ) as Parameters<typeof pricingCoverageProblems>[0];
+    expect(pricingCoverageProblems(table, ["kimi-k3"]).orphanRates).toEqual([]);
   });
 });

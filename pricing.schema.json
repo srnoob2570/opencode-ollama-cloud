@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Ollama Cloud pricing table",
+  "description": "Official Ollama Cloud rates (USD per 1M tokens) from the public rate card, keyed by catalog model id. Regenerated only by the manual update-pricing workflow — never by the automated catalog update.",
+  "type": "object",
+  "properties": {
+    "$schema": { "type": "string" }
+  },
+  "additionalProperties": {
+    "type": "object",
+    "required": ["input", "output", "cachedInput", "unit", "source", "asOf"],
+    "properties": {
+      "input": { "type": "number", "exclusiveMinimum": 0 },
+      "output": { "type": "number", "exclusiveMinimum": 0 },
+      "cachedInput": { "type": "number", "exclusiveMinimum": 0 },
+      "unit": { "const": "per-1M" },
+      "source": { "type": "string" },
+      "asOf": { "type": "string", "format": "date" }
+    },
+    "additionalProperties": false
+  }
+}

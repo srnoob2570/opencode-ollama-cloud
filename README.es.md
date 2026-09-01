@@ -87,15 +87,17 @@ catalog.json (jsDelivr, purgado tras cada commit / raw.githubusercontent / cache
 
 - `catalogUrl`: URL alternativa del catálogo (se intenta primero).
 - `timeoutMs`: timeout de cada fetch (default `5000`).
-- `pricing`: `"off"` (default) o `"reference"` — si el contador de costos de opencode muestra los precios de referencia del catálogo.
+- `pricing`: `"on"` (default) o `"off"` — si el contador de costos de opencode muestra la tarifa oficial de Ollama Cloud. `pricing: "reference"` (el valor viejo opt-in) sigue funcionando y significa `"on"`.
 
 ```json
 {
-  "plugin": [["@srnoob2570/opencode-ollama-cloud", { "pricing": "reference" }]]
+  "plugin": [["@srnoob2570/opencode-ollama-cloud", { "pricing": "off" }]]
 }
 ```
 
-El catálogo trae un **precio de referencia** por modelo — la tarifa de la API upstream en USD por 1M de tokens, construida automáticamente desde las entradas first-party de models.dev y corregible en `catalog/pricing-overrides.json` (los overrides ganan; los desacuerdos con el seed quedan registrados en `conflicts`). Son precios de referencia, **no facturación**: tu plan de ollama.com no cobra por uso, y la tarifa real solo es visible en tu panel de ollama.com. Los modelos sin datos de precio quedan en $0 (sin estimaciones a medias).
+El catálogo trae la **tarifa oficial de Ollama Cloud** por modelo — precios de input, cached input y output en USD por 1M de tokens, directamente de la [rate card](https://ollama.com/pricing) pública de Ollama en `catalog/pricing.json`. Es lo que tus créditos pagan de verdad por token, así que el contador de costos de opencode la muestra por defecto (opt-out: `pricing: "off"` la apaga). Los modelos sin tarifa quedan en $0 (sin estimaciones a medias).
+
+Actualizar la tabla es un **workflow manual**: corrés `bun run update-pricing` y fetcha la rate card viva, imprime un diff tarifa-por-tarifa y reescribe `catalog/pricing.json`. Si la página y el catálogo no cuadran (un modelo nuevo o retirado), aborta con un reporte y no escribe nada. El update automático del catálogo jamás toca el pricing.
 
 ## Estadísticas de streaming y ficha de modelo
 
@@ -114,7 +116,8 @@ junto al contador de tokens:
 - `/stats` — resumen de sesión y últimas respuestas (detalle por step; las
   filas `wire` y `event` son distinguibles).
 - `/model` — ficha del modelo activo: cuantización, familia, capacidades,
-  límites, release y precio de referencia (con `pricing: "reference"`).
+  límites, release y la tarifa oficial (input · cached input · output por 1M;
+  salvo `pricing: "off"`).
 
 El promedio solo cuenta el **chat principal**: subagentes, titlegen y
 compaction jamás entran (señales verificadas contra el código de opencode).
@@ -128,7 +131,7 @@ best-effort hasta que upstream la documente).
 ```json
 {
   "plugin": [
-    ["@srnoob2570/opencode-ollama-cloud", { "pricing": "reference" }],
+    ["@srnoob2570/opencode-ollama-cloud", {}],
     ["@srnoob2570/opencode-ollama-cloud/tui", {}]
   ]
 }

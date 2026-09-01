@@ -1,4 +1,4 @@
-import type { Catalog, CatalogModel } from "../plugin/catalog.ts";
+import type { Catalog, CatalogModel, PricingRate } from "../plugin/catalog.ts";
 import { familyOf } from "./resolve-catalog.ts";
 
 // Shared test fixtures (SIMPL-013). One factory per side of the catalog
@@ -41,4 +41,17 @@ export const catalogWith = (
   generatedAt: "2026-08-30T00:00:00.000Z",
   modelsHash,
   models,
+});
+
+/** Minimal valid official-rate entry (a catalog/pricing.json value). */
+export const pricingRate = (
+  overrides: Partial<PricingRate> = {},
+): PricingRate => ({
+  input: 0.44,
+  output: 1.32,
+  cachedInput: 0.014,
+  unit: "per-1M",
+  source: "https://ollama.com/pricing",
+  asOf: "2026-09-01",
+  ...overrides,
 });

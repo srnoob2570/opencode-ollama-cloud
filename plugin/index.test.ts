@@ -64,45 +64,49 @@ describe("toModelV2 interleaved", () => {
     expect(toModelV2(noThink).capabilities.interleaved).toBe(false);
   });
 });
-// Reference pricing: opt-in via the plugin knob (`pricing: "reference"`).
-// Prices live in the catalog as USD per 1M tokens — opencode's CostV2 unit.
-const PRICED: CatalogModel = {
-  ...GLM53,
-  pricing: {
-    input: 0.075,
-    output: 0.25,
-    unit: "per-1M",
-    provider: "zai",
-    source: "https://models.dev/api.json",
-    asOf: "2026-08-30",
-  },
+// Official Ollama Cloud rate (a catalog/pricing.json entry, USD per 1M) —
+// joined by id at plugin load and passed to toModelV2 as the `rate`. The
+// knob is opt-out: default on, "off" is the only off, legacy "reference"
+// keeps pricing on.
+const OFFICIAL = {
+  input: 0.44,
+  output: 1.32,
+  cachedInput: 0.014,
+  unit: "per-1M" as const,
+  source: "https://ollama.com/pricing",
+  asOf: "2026-09-01",
 };
 
 describe("toModelV2 pricing", () => {
-  test("default (off) keeps the cost counter at zero even when pricing exists", () => {
-    const model = toModelV2(PRICED);
-    expect(model.cost).toEqual({
+  test("default (on) wires the official rate into the cost counter", () => {
+    expect(toModelV2(GLM53, undefined, OFFICIAL).cost).toEqual({
+      input: 0.44,
+      output: 1.32,
+      cache: { read: 0.014, write: 0 },
+    });
+  });
+
+  test("pricing: off keeps the counter at zero even with a rate", () => {
+    expect(toModelV2(GLM53, "off", OFFICIAL).cost).toEqual({
       input: 0,
       output: 0,
       cache: { read: 0, write: 0 },
     });
   });
 
-  test("reference mode maps the catalog pricing into the cost counter", () => {
-    const model = toModelV2(PRICED, "reference");
-    expect(model.cost).toEqual({
-      input: 0.075,
-      output: 0.25,
+  test("model without a table entry stays at $0 even with pricing on (no partial estimates)", () => {
+    expect(toModelV2(GLM53).cost).toEqual({
+      input: 0,
+      output: 0,
       cache: { read: 0, write: 0 },
     });
   });
 
-  test("models without pricing data stay at $0 in both modes (no partial estimates)", () => {
-    expect(toModelV2(PRICED, "reference").cost.input).toBe(0.075);
-    expect(toModelV2(GLM53, "reference").cost).toEqual({
-      input: 0,
-      output: 0,
-      cache: { read: 0, write: 0 },
+  test("rate without cachedInput → cache.read 0, never NaN", () => {
+    const { cachedInput: _drop, ...noCache } = OFFICIAL;
+    expect(toModelV2(GLM53, undefined, noCache).cost.cache).toEqual({
+      read: 0,
+      write: 0,
     });
   });
 });

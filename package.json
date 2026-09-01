@@ -30,11 +30,13 @@
     "plugin/tui-display.ts",
     "plugin/tui.tsx",
     "catalog",
-    "catalog.schema.json"
+    "catalog.schema.json",
+    "pricing.schema.json"
   ],
   "scripts": {
     "check": "bun scripts/update-catalog.ts check",
     "update": "bun scripts/update-catalog.ts update",
+    "update-pricing": "bun scripts/update-pricing.ts",
     "validate": "bun scripts/validate-catalog.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"

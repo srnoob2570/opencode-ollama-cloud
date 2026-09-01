@@ -4,14 +4,18 @@ import {
   PROVIDER_CONFIG,
   PROVIDER_ID,
   loadCatalog,
+  loadPricing,
   type CatalogModel,
   type PluginOpts,
+  type PricingRate,
 } from "./catalog.ts";
 import { createStatsCapture, type FetchLike } from "./capture.ts";
+import { pricingKnob } from "./tui-display.ts";
 
-// Catalog models without pricing data and the models.dev passthrough share the
-// "zero reference cost" shape (opencode's CostV2, USD per 1M tokens). Factory,
-// not constant: a shared mutable object would alias every model's cost.
+// Catalog models without a rate in the pricing table and the models.dev
+// passthrough share the zero-cost shape (opencode's CostV2, USD per 1M
+// tokens). Factory, not constant: a shared mutable object would alias every
+// model's cost.
 const zeroCost = () => ({ input: 0, output: 0, cache: { read: 0, write: 0 } });
 
 const MODEL_OUTPUT_CAPS = {
@@ -28,14 +32,17 @@ const MODEL_OUTPUT_CAPS = {
 // and ollama.com/v1 maps reasoning_effort (low|medium|high|max) to its native think level.
 export function toModelV2(
   m: CatalogModel,
-  pricing: "off" | "reference" = "off",
+  pricing: "off" | "on" = "on",
+  rate?: PricingRate,
 ): ModelV2 {
   const vision = m.capabilities.vision || m.input.includes("image");
   const reasoning = m.capabilities.thinking;
-  // prices are USD per 1M tokens — opencode's CostV2 contract. Reference costs
-  // are opt-in: default off keeps the counter at $0.00, and a model without
-  // pricing data stays at $0 in both modes (no partial estimates).
-  const ref = pricing === "reference" ? m.pricing : undefined;
+  // prices are USD per 1M tokens — opencode's CostV2 contract. The official
+  // Ollama Cloud rate is opt-out: default on, `pricing: "off"` keeps the
+  // counter at $0.00. A model without a table entry stays at $0 in both
+  // modes (no partial estimates). cachedInput feeds cache.read; cache.write
+  // stays 0 — the rate card publishes no cache-write column.
+  const official = pricing === "on" ? rate : undefined;
   return {
     id: m.id,
     providerID: PROVIDER_ID,
@@ -66,8 +73,16 @@ export function toModelV2(
       },
       output: MODEL_OUTPUT_CAPS,
     },
-    cost: ref
-      ? { ...zeroCost(), input: ref.input, output: ref.output }
+    cost: official
+      ? {
+          ...zeroCost(),
+          input: official.input,
+          output: official.output,
+          cache: {
+            read: official.cachedInput ?? 0,
+            write: 0,
+          },
+        }
       : zeroCost(),
     limit: {
       context: m.context,
@@ -88,9 +103,11 @@ export function toModelV2(
   };
 }
 
+// Pricing knob (opt-out): default on — the rate is the OFFICIAL Ollama Cloud
+// tariff (the public rate card), so only `off` turns it off. Legacy configs
+// saying "reference" (the old opt-in) keep pricing on, never accidentally off.
 const opencodeOllamaCloud: Plugin = async (_input, options) => {
-  const pricing: "off" | "reference" =
-    options?.pricing === "reference" ? "reference" : "off";
+  const pricing: "off" | "on" = pricingKnob(options?.pricing);
   // Stats knob (ticket 08): default ON — opt-out, the mirror of pricing. In
   // "off" the plugin behaves exactly as before the stats effort: no fetch
   // wrap, no event sink, no handoff, zero overhead.
@@ -136,12 +153,19 @@ const opencodeOllamaCloud: Plugin = async (_input, options) => {
       id: PROVIDER_ID,
       models: async (provider) => {
         try {
-          const catalog = await loadCatalog(opts);
+          // The official-rate table rides the same mirrors as the catalog and
+          // joins by id; a missing or partial table just leaves those models
+          // at $0 — never a wrong price. With the knob off the table is
+          // never fetched: the opt-out costs zero requests, like stats: off.
+          const [catalog, rates] = await Promise.all([
+            loadCatalog(opts),
+            pricing === "on" ? loadPricing(opts) : Promise.resolve(null),
+          ]);
           if (catalog) {
             // Entries were already validated by isCatalog in loadCatalog/readCache.
             const models: Record<string, ModelV2> = {};
             for (const m of catalog.models)
-              models[m.id] = toModelV2(m, pricing);
+              models[m.id] = toModelV2(m, pricing, rates?.[m.id]);
             if (Object.keys(models).length > 0) return models;
           }
           console.warn(
@@ -154,9 +178,9 @@ const opencodeOllamaCloud: Plugin = async (_input, options) => {
           );
         }
         // Passthrough: models.dev's ollama-cloud entries carry no cost today,
-        // but the reference contract holds regardless — a model without OUR
-        // catalog's pricing never shows a cost, even if models.dev attaches
-        // one later (cost here means the reference rate, not their number).
+        // but the official-rate contract holds regardless — a model without
+        // OUR pricing table never shows a cost, even if models.dev attaches
+        // one later (cost here means the Ollama Cloud rate, not their number).
         const models: Record<string, ModelV2> = {};
         for (const [id, model] of Object.entries(provider.models))
           models[id] = { ...model, cost: zeroCost() };

@@ -67,7 +67,11 @@ export interface ModelCard {
   context: number;
   maxOutput: number;
   capabilities: { tools: boolean; thinking: boolean; vision: boolean };
-  pricing?: { input: number; output: number } | null;
+  pricing?: {
+    input: number;
+    output: number;
+    cachedInput?: number;
+  } | null;
 }
 
 /** The /model card (mock §3) — quantization is the protagonist. */
@@ -86,9 +90,7 @@ export function formatModelCard(model: ModelCard, pricingOn: boolean): string {
     `  Context           ${formatTokens(model.context)} · output ${formatTokens(model.maxOutput)}`,
     `  Capabilities      ${capabilityList(model.capabilities)}`,
     ...(pricingOn
-      ? [
-          `  Ref. price        $${model.pricing?.input ?? "—"}/${model.pricing?.output ?? "—"} per 1M`,
-        ]
+      ? [`  Official rate     ${officialRate(model.pricing)}`]
       : []),
     "",
     implicit
@@ -103,6 +105,14 @@ const formatTokens = (n: number): string =>
   n >= 1024 * 1024
     ? `${Math.round(n / (1024 * 1024))}M`
     : `${Math.round(n / 1024)}k`;
+
+// Official Ollama Cloud rate — rate card column order: input / cached
+// input / output. A missing column renders as "—", never as 0.
+const officialRate = (p: ModelCard["pricing"]): string => {
+  const money = (n: number | undefined): string =>
+    n === undefined ? "—" : `$${n}`;
+  return `${money(p?.input)} in · ${money(p?.cachedInput)} cached · ${money(p?.output)} out per 1M`;
+};
 
 const capabilityList = (caps: ModelCard["capabilities"]): string => {
   const list: string[] = [];
@@ -131,24 +141,63 @@ export function pickTuiFeatures(api: unknown): {
 }
 
 /**
- * Reference pricing is documented on the SERVER plugin entry, but /model runs
- * in the TUI entry — scan opencode's config plugin list too (either entry
- * saying `pricing: "reference"` enables the price row).
+ * Pricing knob, shared by BOTH entries so the only-off rule lives in one
+ * place (code-review finding): the rate is the OFFICIAL Ollama Cloud tariff
+ * (the public rate card), so only the literal "off" turns it off. Legacy
+ * configs saying "reference" (the old opt-in) keep pricing on.
  */
-export function referencePricingActive(
+export const pricingKnob = (value: unknown): "off" | "on" =>
+  value === "off" ? "off" : "on";
+
+/**
+ * Pricing is opt-out and the knob lives on the SERVER plugin entry, but /model
+ * runs in the TUI entry — scan opencode's config plugin list too. Any entry of
+ * this package saying `pricing: "off"` turns the rate row off; legacy
+ * `reference` values keep it on. Default on.
+ */
+export function pricingActive(
   config: unknown,
   ownOptions?: { pricing?: unknown },
 ): boolean {
-  if (ownOptions?.pricing === "reference") return true;
+  if (pricingKnob(ownOptions?.pricing) === "off") return false;
   const entries: unknown = (config as { plugin?: unknown } | null | undefined)
     ?.plugin;
-  if (!Array.isArray(entries)) return false;
-  return entries.some((entry) => {
+  if (!Array.isArray(entries)) return true;
+  return !entries.some((entry) => {
     const [name, options] = Array.isArray(entry) ? entry : [entry, undefined];
     return (
       typeof name === "string" &&
       name.startsWith("@srnoob2570/opencode-ollama-cloud") &&
-      (options as { pricing?: unknown } | undefined)?.pricing === "reference"
+      pricingKnob((options as { pricing?: unknown } | undefined)?.pricing) ===
+        "off"
     );
   });
+}
+
+/**
+ * The /model card reads the catalog through the same doors as the server
+ * entry: a user-configured `catalogUrl` (set on either entry) must replace
+ * the default mirrors — and the official-rate table runs rateless beside it
+ * (loadPricing's custom-catalog contract). Without this scan the card would
+ * render OUR rates for a third-party catalog's model ids.
+ */
+export function configuredCatalogUrl(
+  config: unknown,
+  ownOptions?: { catalogUrl?: unknown },
+): string | undefined {
+  if (typeof ownOptions?.catalogUrl === "string") return ownOptions.catalogUrl;
+  const entries: unknown = (config as { plugin?: unknown } | null | undefined)
+    ?.plugin;
+  if (!Array.isArray(entries)) return undefined;
+  for (const entry of entries) {
+    const [name, options] = Array.isArray(entry) ? entry : [entry, undefined];
+    const url = (options as { catalogUrl?: unknown } | undefined)?.catalogUrl;
+    if (
+      typeof name === "string" &&
+      name.startsWith("@srnoob2570/opencode-ollama-cloud") &&
+      typeof url === "string"
+    )
+      return url;
+  }
+  return undefined;
 }

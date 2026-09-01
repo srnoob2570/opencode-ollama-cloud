@@ -5,13 +5,7 @@ import {
   type Catalog as BaseCatalog,
   type CatalogModel,
 } from "../plugin/catalog.ts";
-import {
-  MODELS_DEV_URL,
-  familyOf,
-  resolveCatalog,
-  tagOf,
-  type PricingOverrides,
-} from "./resolve-catalog.ts";
+import { MODELS_DEV_URL, familyOf, tagOf } from "./resolve-catalog.ts";
 import {
   QUANT_UNKNOWN,
   REGISTRY_BLOB_URL,
@@ -29,25 +23,6 @@ const LIBRARY_URL = (family: string) => `https://ollama.com/library/${family}`;
 
 const CATALOG_PATH = new URL("../catalog/catalog.json", import.meta.url)
   .pathname;
-const OVERRIDES_PATH = new URL(
-  "../catalog/pricing-overrides.json",
-  import.meta.url,
-).pathname;
-
-// Reference-price overrides (catalog/pricing-overrides.json) are manual
-// corrections. Absent file = trust the seed entirely; a PRESENT file that
-// fails to parse aborts loudly — silently dropping manual corrections would
-// publish stale prices as if they were fresh.
-async function loadOverrides(): Promise<PricingOverrides> {
-  const file = Bun.file(OVERRIDES_PATH);
-  if (!(await file.exists())) return {};
-  const raw = await file.json();
-  if (!raw || typeof raw !== "object" || Array.isArray(raw))
-    throw new Error(
-      "pricing-overrides.json must be an object keyed by model id",
-    );
-  return raw as PricingOverrides;
-}
 
 type OllamaModel = { id: string; created: number };
 
@@ -292,8 +267,8 @@ async function main() {
   }
 
   // Re-scrape weekly even when the /v1/models hash is unchanged, so enrichment
-  // data (context windows, capabilities, seed info, pricing) for existing
-  // models gets refreshed. --force does the same on demand.
+  // data (context windows, capabilities, seed info) for existing models gets
+  // refreshed. --force does the same on demand.
   const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
   const stale =
     force ||
@@ -309,11 +284,11 @@ async function main() {
   const seed = await fetchJson<Record<string, any>>(MODELS_DEV_URL).catch(
     () => ({}),
   );
-  // The seed carries maxOutput, reasoningOptions, releaseDate and the
-  // first-party pricing rule. An empty seed (transient models.dev outage)
-  // would publish a silently regressed catalog — context windows stay but
-  // maxOutput falls back to 32768 and prices evaporate. Same policy as a
-  // failed library scrape: abort loudly and let the next scheduled run retry.
+  // The seed carries maxOutput, reasoningOptions and releaseDate — NOT
+  // pricing (that is the manual workflow's). An empty seed (transient
+  // models.dev outage) would publish a silently regressed catalog — context
+  // windows stay but maxOutput falls back to 32768. Same policy as a failed
+  // library scrape: abort loudly and let the next scheduled run retry.
   if (!Object.keys(seed).length)
     throw new Error(
       "models.dev seed is empty — aborting instead of publishing a regressed catalog",
@@ -405,14 +380,9 @@ async function main() {
 
   const merged = mergeSeed(models, seed);
 
-  const resolved = resolveCatalog(merged, {
-    seed,
-    overrides: await loadOverrides(),
-    today: new Date().toISOString().slice(0, 10),
-  });
-  for (const w of resolved.warnings) console.warn(`warning: ${w}`);
-
-  const quantized = await enrichQuantization(resolved.models, catalog);
+  // Price-blind by contract: the official rate card (catalog/pricing.json)
+  // only changes through the manual update-pricing workflow.
+  const quantized = await enrichQuantization(merged, catalog);
 
   const next: Catalog = {
     ...catalog,
@@ -432,7 +402,7 @@ async function main() {
   await Bun.write(CATALOG_PATH + ".tmp", JSON.stringify(next, null, 2) + "\n");
   await rename(CATALOG_PATH + ".tmp", CATALOG_PATH);
   console.log(
-    `catalog updated: ${quantized.length} models, ${byFamily.size} families scraped, ${resolved.warnings.length} pricing warnings, ${quantized.filter((m) => m.quantization === QUANT_UNKNOWN).length} quantization unknown`,
+    `catalog updated: ${quantized.length} models, ${byFamily.size} families scraped, ${quantized.filter((m) => m.quantization === QUANT_UNKNOWN).length} quantization unknown`,
   );
 }
 

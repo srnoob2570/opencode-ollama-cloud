@@ -39,8 +39,12 @@ jobs:
             git add catalog/
             git commit -m "chore: refresh ollama cloud catalog"
             git push
-            curl -sfS "https://purge.jsdelivr.net/gh/srnoob2570/opencode-ollama-cloud@main/catalog/catalog.json" \
-              || echo "::warning::jsDelivr purge failed; CDN may serve a stale catalog until its TTL expires"
+            # Both shipped files: a stale pricing.json still validates, so
+            # without the purge refreshed rates would not reach users.
+            for f in catalog/catalog.json catalog/pricing.json; do
+              curl -sfS "https://purge.jsdelivr.net/gh/srnoob2570/opencode-ollama-cloud@main/$f" \
+                || echo "::warning::jsDelivr purge failed for $f; CDN may serve it stale until its TTL expires"
+            done
           else
             echo "Catalog unchanged, nothing to commit"
           fi
