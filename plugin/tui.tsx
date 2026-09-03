@@ -14,6 +14,7 @@ import {
   formatLiveLine,
   formatModelCard,
   formatStatsDialogBody,
+  pickSessionFile,
   pickTuiFeatures,
   pricingActive,
   type ModelCard,
@@ -41,6 +42,11 @@ interface TuiLike {
     }) => string;
   };
   keymap?: { registerLayer: (layer: Record<string, unknown>) => unknown };
+  lifecycle?: { onDispose?: (dispose: () => void) => unknown };
+  log?: {
+    warn?: (...args: unknown[]) => void;
+    error?: (...args: unknown[]) => void;
+  };
   event?: {
     on: (type: string, handler: (event: unknown) => void) => () => void;
   };
@@ -93,27 +99,51 @@ const debug = (...message: unknown[]) => {
 // reuse it so one opencode window can never render another session's stats
 let activeSessionID: string | null = null;
 
+// whether a /stats dialog is currently open (set by showStats, cleared on the
+// confirm/clear path and whenever another dialog of ours replaces it): the
+// 1 s poll re-renders its body while it is open. /model is snapshot-only and
+// never sets this.
+let statsDialogOpen = false;
+
 // Handoff reads are throttled but never stale on purpose: each refresh waits
 // its slot (~120 ms) and then reads FRESH — a TTL cache can swallow the final
-// persist (the exact bug that froze the live line on dashes).
+// persist (the exact bug that froze the live line on dashes). Per-session
+// since D3: each read targets exactly one stats-<sessionID>.json.
 let lastReadAt = 0;
-const readFresHandoff = async (): Promise<HandoffFile | null> => {
+const readFreshHandoff = async (
+  sessionID: string,
+): Promise<HandoffFile | null> => {
   const wait = Math.max(0, 120 - (Date.now() - lastReadAt));
   try {
     if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-    return await handoff.read();
+    return await handoff.read(sessionID);
   } finally {
     lastReadAt = Date.now();
   }
 };
-const readHandoff = readFresHandoff;
-const sessionFile = async (): Promise<HandoffFile | null> => {
-  const file = await readFresHandoff();
-  // the active session id is what the slot last saw; a transient render with
-  // no session_id must NOT clobber it (that was the revert-to-empty bug)
-  if (file && (!activeSessionID || file.sessionID === activeSessionID))
-    return file;
-  return null;
+const sessionFile = async (
+  sessionID?: string | null,
+): Promise<HandoffFile | null> => {
+  const sid = sessionID ?? activeSessionID;
+  if (!sid) return null;
+  const file = await readFreshHandoff(sid);
+  // hard guard (pickSessionFile): while no session is active NOTHING may
+  // display — a startup render must never surface a stale file from a
+  // previous launch — and the file must be THIS session's
+  return pickSessionFile(file, activeSessionID);
+};
+
+// opencode-side observability: the TUI process's failures leave no trace in
+// opencode's logs, so when the api exposes a logger, mirror them there too —
+// fully feature-detected, silent when absent (tui-debug.log stays the
+// always-on record).
+const logToOpencode = (api: TuiLike, ...message: unknown[]): void => {
+  try {
+    if (typeof api.log?.warn === "function") api.log.warn(...message);
+    else if (typeof api.log?.error === "function") api.log.error(...message);
+  } catch {
+    /* logging must never break rendering */
+  }
 };
 
 // /model consults the catalog; memoize the promise (TTL) so opening the
@@ -152,28 +182,62 @@ const pricingOnce = (): Promise<PricingTable | null> => {
   return pricingCache.promise;
 };
 
+// The /stats body is the same string at open and on every live re-render:
+// one computation, one model-attribution rule (the header names the LAST
+// model; the average spans model switches by design).
+const statsBody = async (): Promise<string> => {
+  const file = await sessionFile();
+  return formatStatsDialogBody(
+    file?.summary ?? ZERO_SUMMARY,
+    file?.steps ?? [],
+    file?.steps[0]?.modelID ?? "—",
+    Date.now(),
+  );
+};
+const renderStatsDialog = (api: TuiLike, body: string): void => {
+  api.ui.dialog.replace(() =>
+    api.ui.DialogAlert({
+      title: "/stats",
+      message: body,
+      onConfirm: () => {
+        statsDialogOpen = false;
+        api.ui.dialog.clear();
+      },
+    }),
+  );
+  // only after replace succeeded: a throw here leaves no dialog to refresh
+  statsDialogOpen = true;
+};
+
 const showStats = async (api: TuiLike): Promise<void> => {
   try {
-    const file = await sessionFile();
-    const body = formatStatsDialogBody(
-      file?.summary ?? ZERO_SUMMARY,
-      file?.steps ?? [],
-      file?.steps[0]?.modelID ?? "—",
-      Date.now(),
-    );
-    api.ui.dialog.replace(() =>
-      api.ui.DialogAlert({
-        title: "/stats",
-        message: body,
-        onConfirm: () => api.ui.dialog.clear(),
-      }),
-    );
+    renderStatsDialog(api, await statsBody());
   } catch (error) {
+    statsDialogOpen = false;
     console.warn(
       "[opencode-ollama-cloud/tui] /stats failed silently:",
       error instanceof Error ? error.message : error,
     );
     api.ui.dialog.clear();
+  }
+};
+
+// Live /stats: the body was computed once at open, so while the dialog is
+// open each poll tick recomputes and re-renders it. Best-effort — a failed
+// tick leaves the dialog as-is and the next one retries (silent degradation).
+const refreshStatsDialog = async (api: TuiLike): Promise<void> => {
+  if (!statsDialogOpen) return;
+  try {
+    const body = await statsBody();
+    // the read awaits ~120 ms: the dialog may have been closed/disposed
+    // meanwhile, and re-renders must never resurrect it
+    if (!statsDialogOpen) return;
+    renderStatsDialog(api, body);
+  } catch (error) {
+    debug(
+      "stats dialog refresh error:",
+      error instanceof Error ? error.message : String(error),
+    );
   }
 };
 
@@ -223,6 +287,9 @@ const showModel = async (api: TuiLike, pricingOn: boolean): Promise<void> => {
         onConfirm: () => api.ui.dialog.clear(),
       }),
     );
+    // /model just replaced whatever dialog was open — the /stats dialog is
+    // gone, so the poll must not resurrect it over this card
+    statsDialogOpen = false;
   } catch (error) {
     console.warn(
       "[opencode-ollama-cloud/tui] /model failed silently:",
@@ -269,7 +336,9 @@ export default {
       let lastLine: string | null = null;
       const refresh = async (sessionID?: string) => {
         try {
-          const file = await sessionFile();
+          // reads for the prop's session (falling back to the active one);
+          // null → sessionFile returns null → the live line stays on "—"
+          const file = await sessionFile(sessionID);
           const next = formatLiveLine(file?.summary ?? null);
           // one log line per actual CHANGE of the shown value (idle+trailing
           // re-reads would spam otherwise); errors always log
@@ -287,9 +356,12 @@ export default {
           }
           setLine(next);
         } catch (error) {
-          debug(
-            "refresh error:",
-            error instanceof Error ? error.message : String(error),
+          const msg = error instanceof Error ? error.message : String(error);
+          debug("refresh error:", msg);
+          logToOpencode(
+            api,
+            "[opencode-ollama-cloud/tui] stats refresh failed:",
+            msg,
           );
         }
       };
@@ -308,11 +380,15 @@ export default {
               void refresh(props?.session_id);
               return <text fg={api.theme?.current?.textMuted}> {line()} </text>;
             } catch (error) {
-              debug(
-                "slot render error:",
+              const msg =
                 error instanceof Error
                   ? (error.stack ?? error.message)
-                  : String(error),
+                  : String(error);
+              debug("slot render error:", msg);
+              logToOpencode(
+                api,
+                "[opencode-ollama-cloud/tui] stats slot render failed:",
+                msg,
               );
               return null;
             }
@@ -321,6 +397,25 @@ export default {
       });
       debug("slot session_prompt_right registered");
 
+      // D3 housekeeping, once per TUI launch: drop other sessions' handoff
+      // files and anything older than a day (also the legacy v1 stats.json).
+      // Best-effort and awaited nowhere — registration never waits on it.
+      try {
+        void handoff
+          .cleanup(null, 24 * 60 * 60 * 1000)
+          .then((deleted) =>
+            debug("handoff cleanup deleted", String(deleted), "file(s)"),
+          )
+          .catch((error) =>
+            debug(
+              "handoff cleanup error:",
+              error instanceof Error ? error.message : String(error),
+            ),
+          );
+      } catch {
+        /* cleanup is housekeeping, not a dependency */
+      }
+
       // Keep the live line fresh. Verified against opencode's source: the
       // server plugin hook is dispatched fire-and-forget while the TUI bus
       // delivers the same message.updated FIRST — every event-driven read
@@ -328,21 +423,60 @@ export default {
       // updates, trailing re-reads after session.idle (emitted after
       // completed+DB-persist; our hook's file write lags it by ms), and a
       // 1 s poll as the convergence floor.
+      const unsubscribers: Array<() => void> = [];
       try {
-        api.event?.on?.("message.updated", () => void refresh());
-        api.event?.on?.("session.idle", () => {
+        const offUpdated = api.event?.on?.(
+          "message.updated",
+          () => void refresh(),
+        );
+        if (typeof offUpdated === "function") unsubscribers.push(offUpdated);
+        const offIdle = api.event?.on?.("session.idle", () => {
           void refresh();
           setTimeout(() => void refresh(), 200);
           setTimeout(() => void refresh(), 700);
         });
+        if (typeof offIdle === "function") unsubscribers.push(offIdle);
       } catch {
         /* event bus unavailable: the poll still covers it */
       }
-      const poll = setInterval(() => void refresh(), 1000);
+      const poll = setInterval(() => {
+        void refresh();
+        // live /stats: re-render the open dialog's body on the same floor
+        void refreshStatsDialog(api);
+      }, 1000);
       try {
         poll.unref?.();
       } catch {
         /* unref is Node/Bun-specific; fine to keep the interval un-unref'd */
+      }
+
+      // disposal: when opencode announces the TUI is going away, release
+      // everything this module registered (event subs, poll, dialog-refresh
+      // state); feature-detected — builds without the lifecycle API simply
+      // keep the unref'd poll until process exit.
+      let disposed = false;
+      const dispose = () => {
+        if (disposed) return; // idempotent: opencode may call it more than once
+        disposed = true;
+        try {
+          for (const off of unsubscribers) {
+            try {
+              off();
+            } catch {
+              /* one failing unsubscribe must not stop the rest */
+            }
+          }
+          clearInterval(poll);
+          statsDialogOpen = false;
+        } catch {
+          /* silent-degradation contract: dispose never throws */
+        }
+      };
+      try {
+        if (typeof api.lifecycle?.onDispose === "function")
+          api.lifecycle.onDispose(dispose);
+      } catch {
+        /* no disposal API: the unref'd poll dies with the process */
       }
 
       if (features.keymap) {

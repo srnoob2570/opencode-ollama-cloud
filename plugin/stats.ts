@@ -1,14 +1,18 @@
 // Streaming stats pipeline (TTFT / TPS), pure by design: no fs, no timers, no
 // network. This module is the single seam the stats effort tests through
-// (approved in the implementation spec); the capture routes (wire fetch wrap
-// in index.ts, event correlation) and the TUI module both feed on it.
+// (approved in the implementation spec); the wire-fetch capture (capture.ts)
+// and the TUI module both feed on it.
 //
 // Glossary (CONTEXT.md): a unit is an *LLM step* (each streaming completion);
 // the *session average* is token-weighted TPS + simple-mean TTFT across
 // main-thread steps only — no per-model breakdown, never persisted.
 
-/** Where a measurement came from. `wire` beats `event` in precision. */
-export type MeasurementSource = "wire" | "wire-nostream" | "event";
+/**
+ * Where a measurement came from. Only the wire route exists anymore (D2: the
+ * event route was retired — stats measure ONLY ollama-cloud); `wire-nostream`
+ * is purely a LABEL for single-chunk responses so the UI can tag "(direct)".
+ */
+export type MeasurementSource = "wire" | "wire-nostream";
 
 /** One measured LLM step (spec §1.4). In-memory per session, never persisted. */
 export interface StepMeasurement {
@@ -93,9 +97,13 @@ export interface MainStepSignals {
   requestParentSessionId?: string | null;
   session?: SessionInfo | null;
   message?: AssistantMessageInfo | null;
-  /** modelID the session is currently driven with — sanity check only. */
-  sessionModelID?: string | null;
 }
+
+/** Rule 3 of the main-step gate: compaction can complete like a real step. */
+export const isCompactionMessage = (message: AssistantMessageInfo): boolean =>
+  message.agent === "compaction" ||
+  message.mode === "compaction" ||
+  message.summary === true;
 
 export function isMainStep(signals: MainStepSignals): boolean {
   // 1. wire signal: subagent sessions always send x-parent-session-id
@@ -109,21 +117,13 @@ export function isMainStep(signals: MainStepSignals): boolean {
   if (message.role !== "assistant") return false;
   // 3. compaction is excluded explicitly (it can inherit the session model,
   //    so modelID can never be the primary filter here)
-  if (message.agent === "compaction" || message.mode === "compaction")
-    return false;
-  if (message.summary) return false;
-  // 4. the driving agent must match the session's active agent (constant
+  if (isCompactionMessage(message)) return false;
+  // 4. the driving agent must be the session's active agent (constant
   //    names are wrong — build/plan/custom agents exist)
   if (!message.agent || !session.agent || message.agent !== session.agent)
     return false;
-  // sanity check only: same model as the session's choice (NOT sufficient
-  // alone, compaction inherits it — hence the checks above)
-  if (
-    signals.sessionModelID &&
-    message.modelID &&
-    signals.sessionModelID !== message.modelID
-  )
-    return false;
+  // (the modelID sanity-check was retired — spec decision 4 withdrawn: it
+  // never discriminated anything since compaction inherits the session model)
   return true;
 }
 
@@ -134,18 +134,25 @@ export interface PendingWireStep {
   /** Milliseconds of wall-clock window the request may be attached within. */
   deadline: number;
   sessionParentId: string | null;
-  sessionModelID: string | null;
 }
 
 export const PENDING_WINDOW_MS = 30_000;
+/** Same-clock server-side tolerance between message.time.created and the
+ * request's ts when correlating by time (ratified claim contract). */
+export const CLAIM_TOLERANCE_MS = 2_000;
 
 /**
  * Attach a pending wire measurement to the assistant message that just
- * updated for its session. When several requests are unclaimed (an aborted
- * attempt followed by a retry), the NEWEST one wins — the message the server
- * just completed is the latest request by construction. Uncorrelated requests
- * (titlegen writes no message) expire and are dropped; compaction attaches
- * but is then rejected by isMainStep's compaction checks.
+ * updated for its session. Correlation is TIME-based, not blind newest-wins:
+ * among the session's unexpired pendings we take the one with the LARGEST ts
+ * that still falls at/below the message's creation + 2 s — so an aborted old
+ * attempt and a real retry each correlate to their own message instead of the
+ * newest pending being stolen by whoever updates first. A message without a
+ * usable time.created falls back to the legacy newest-wins pick. Whatever the
+ * selection, the chosen pending is CONSUMED even when the main-step gate
+ * rejects it (compaction attaches and is dropped — its measurement must never
+ * leak into the next real step's claim); uncorrelated requests (titlegen)
+ * expire and are swept.
  *
  * `now` injectable for tests.
  */
@@ -156,27 +163,46 @@ export function claimPendingWire(
     sessionID: string;
     session: SessionInfo | null;
     message: AssistantMessageInfo;
+    /** message.time.created in ms; null when unknown → newest-wins fallback. */
+    messageTimeCreated: number | null;
   },
-): { claimed: StepMeasurement | null; rest: PendingWireStep[] } {
+): {
+  claimed: StepMeasurement | null;
+  /** The pending consumed by this attempt, even when the gate rejects it. */
+  claimedPending: PendingWireStep | null;
+  rest: PendingWireStep[];
+} {
+  const alive = (s: PendingWireStep): boolean =>
+    s.sessionID === input.sessionID && s.deadline >= input.now;
   let claimedIndex = -1;
-  // newest first: later insertions are later requests for this session
-  for (let i = pending.length - 1; i >= 0; i--) {
-    const step = pending[i];
-    if (
-      claimedIndex === -1 &&
-      step.sessionID === input.sessionID &&
-      step.deadline >= input.now
-    ) {
-      claimedIndex = i;
-      break;
+  if (input.messageTimeCreated == null) {
+    // newest first: later insertions are later requests for this session
+    for (let i = pending.length - 1; i >= 0; i--) {
+      if (alive(pending[i])) {
+        claimedIndex = i;
+        break;
+      }
+    }
+  } else {
+    // largest ts still at/below the message creation (+ tolerance); ties go
+    // to the later insertion (the later request for the same clock instant)
+    const limit = input.messageTimeCreated + CLAIM_TOLERANCE_MS;
+    let bestTs = -Infinity;
+    for (let i = 0; i < pending.length; i++) {
+      const step = pending[i];
+      if (!alive(step)) continue;
+      if (step.measurement.ts <= limit && step.measurement.ts >= bestTs) {
+        bestTs = step.measurement.ts;
+        claimedIndex = i;
+      }
     }
   }
-  const claimed = claimedIndex >= 0 ? pending[claimedIndex] : null;
+  const claimedPending = claimedIndex >= 0 ? pending[claimedIndex] : null;
   const restPending = pending.filter((_, i) => i !== claimedIndex);
-  let result: StepMeasurement | null = null;
-  if (claimed) {
-    result = {
-      ...claimed.measurement,
+  let claimed: StepMeasurement | null = null;
+  if (claimedPending) {
+    claimed = {
+      ...claimedPending.measurement,
       sessionID: input.sessionID,
       providerID: input.message.providerID ?? "unknown",
       modelID: input.message.modelID ?? "unknown",
@@ -188,15 +214,23 @@ export function claimPendingWire(
         message: input.message,
       })
     )
-      result = null;
+      claimed = null;
   }
-  return { claimed: result, rest: restPending };
+  return { claimed, claimedPending, rest: restPending };
+}
+
+/** What a claim attempt concluded, for the statsDebug instrumentation. */
+export type ClaimResult =
+  "accepted" | "rejected-compaction" | "rejected-gate" | "none";
+
+export interface ClaimAttempt {
+  /** Pendings the attempt could choose from (same session, unexpired). */
+  pendings: Array<{ ts: number; source: MeasurementSource }>;
+  result: ClaimResult;
 }
 
 /** Rolling, per-session store: source of truth for the live line and dialogs. */
 export interface StatsCollector {
-  /** Event route: full signals known upfront, ingest directly. */
-  ingest(measurement: StepMeasurement, signals: MainStepSignals): void;
   /** Wire route: stash a request measurement until its assistant message shows up. */
   pend(
     measurement: Omit<StepMeasurement, "sessionID" | "providerID" | "modelID">,
@@ -204,31 +238,49 @@ export interface StatsCollector {
       sessionID: string;
       requestParentSessionId: string | null;
       sessionParentId: string | null;
-      sessionModelID: string | null;
       now: number;
     },
   ): void;
-  /** Wire route: attach the newest unclaimed pending step for the session. */
+  /** Wire route: correlate an assistant message with a pending step. */
   claim(input: {
     now: number;
     sessionID: string;
     session: SessionInfo | null;
     message: AssistantMessageInfo;
-  }): void;
+    messageTimeCreated: number | null;
+  }): ClaimAttempt;
   /** Drop stale pendings that no message ever claimed (titlegen). */
   sweep(now: number): void;
   summary(): SessionSummary;
   recent(count: number, now?: number): Array<StepMeasurement & { at: number }>;
 }
 
+/**
+ * Cap on the in-memory step list: recent()/handoff never need deep history,
+ * and a daemon-long session must not accumulate unbounded steps. summary()
+ * reads RUNNING totals (kept on every insert), so trimming cannot change the
+ * session average — summary stays EXACTLY summarize(all steps ever pushed).
+ */
+export const MAX_COLLECTOR_STEPS = 500;
+
 export const createStatsCollector = (sessionID: string): StatsCollector => {
   const steps: StepMeasurement[] = [];
   let pending: PendingWireStep[] = [];
+  let stepsCount = 0;
+  let tokensOutTotal = 0;
+  let decodeMsTotal = 0;
+  let ttftMsSum = 0;
+
+  const remember = (step: StepMeasurement): void => {
+    steps.push(step);
+    if (steps.length > MAX_COLLECTOR_STEPS) steps.shift(); // trimmed tail only
+    stepsCount += 1;
+    tokensOutTotal += step.tokensOut;
+    decodeMsTotal += step.decodeMs;
+    ttftMsSum += step.ttftMs;
+  };
 
   return {
-    ingest(measurement, signals) {
-      if (isMainStep(signals)) steps.push({ ...measurement, sessionID });
-    },
     pend(measurement, input) {
       // child sessions are excluded wire-side, before any correlation
       if (input.requestParentSessionId || input.sessionParentId) return;
@@ -240,19 +292,40 @@ export const createStatsCollector = (sessionID: string): StatsCollector => {
         },
         deadline: input.now + PENDING_WINDOW_MS,
         sessionParentId: input.sessionParentId,
-        sessionModelID: input.sessionModelID,
       });
     },
     claim(input) {
+      // snapshot the candidate set first: it is what the instrumentation logs
+      const pendings = pending
+        .filter(
+          (p) => p.sessionID === input.sessionID && p.deadline >= input.now,
+        )
+        .map((p) => ({ ts: p.measurement.ts, source: p.measurement.source }));
       const result = claimPendingWire(pending, input);
       pending = result.rest;
-      if (result.claimed) steps.push(result.claimed);
+      let claimResult: ClaimResult = "none";
+      if (result.claimedPending) {
+        claimResult = result.claimed
+          ? "accepted"
+          : isCompactionMessage(input.message)
+            ? "rejected-compaction"
+            : "rejected-gate";
+      }
+      if (result.claimed) remember(result.claimed);
+      return { pendings, result: claimResult };
     },
     sweep(now) {
       pending = pending.filter((p) => p.deadline >= now);
     },
     summary() {
-      return summarize(steps);
+      return {
+        steps: stepsCount,
+        tokensOutTotal,
+        decodeMsTotal,
+        avgTps:
+          decodeMsTotal === 0 ? 0 : tokensOutTotal / (decodeMsTotal / 1000),
+        avgTtftMs: stepsCount === 0 ? 0 : ttftMsSum / stepsCount,
+      };
     },
     recent(count, now = Date.now()) {
       return [...steps]
@@ -274,8 +347,12 @@ export interface RecordedChunk {
 
 /**
  * Turn recorded chunk timestamps into an LLM step measurement. TTFT = first
- * chunk arrival; decode = last → first; tokens from the final usage chunk
- * (opencode always requests include_usage — see capacidades research).
+ * chunk arrival − request start (for a non-stream response this is the FULL
+ * latency — correct per D1). decode = last → first chunk arrival, NEVER
+ * t2 − t0: TPS must not penalize TTFT, so a step without real streaming gets
+ * decodeMs ≈ 0 and thus weight 0 in the token-weighted session TPS. Tokens
+ * come from the final usage chunk (opencode always requests include_usage —
+ * see capacidades research); a step with no output tokens is not a step.
  * `t2` = stream end. Non-stream responses pass a single chunk and t2.
  */
 export function measurementFromWire(input: {
@@ -291,12 +368,13 @@ export function measurementFromWire(input: {
   const tokensOut = usage?.completion_tokens;
   const ttftMs = first.t - input.t0;
   const decodeMs = input.t2 - first.t;
-  const fallbackDecodeMs = input.t2 - input.t0;
+  // label only — the UI tags single-chunk responses "(direct)"; it must NOT
+  // change the math (D1: decode never stretches back to the request start)
   const noStream = input.chunks.length === 1 && input.t2 - first.t === 0;
   if (
     typeof tokensOut !== "number" ||
     !Number.isFinite(tokensOut) ||
-    tokensOut < 0
+    tokensOut <= 0
   )
     return null;
   return {
@@ -305,7 +383,7 @@ export function measurementFromWire(input: {
     modelID: input.modelID,
     ttftMs: Math.max(0, ttftMs),
     tokensOut: tokensOut,
-    decodeMs: Math.max(0, noStream ? fallbackDecodeMs : decodeMs),
+    decodeMs: Math.max(0, decodeMs),
     source: noStream ? "wire-nostream" : "wire",
     ts: input.t0,
   };

@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { catalogModel } from "../scripts/test-fixtures.ts";
 import type { CatalogModel } from "./catalog.ts";
-import { toModelV2 } from "./index.ts";
+// Helpers live outside the entry module: opencode's legacy plugin loader
+// calls EVERY exported function of ./index.ts as a plugin factory with
+// (PluginInput, options), so that module must export only the default
+// factory (see the note there).
+import { createStatsDebugSink, statsDebugSinkFor } from "./debug-sink.ts";
+import { toModelV2 } from "./models.ts";
 import opencodeOllamaCloud from "./index.ts";
 
 // Fixture mirrors the live glm-5.3 catalog entry (2026-08): glm-5.3 advertises
@@ -133,5 +141,41 @@ describe("stats knob", () => {
     const { plugin, cfg } = await make({ stats: "off" });
     expect(cfg.provider["ollama-cloud"].options).toBeUndefined();
     expect((plugin as any).event).toBeUndefined();
+  });
+});
+
+// statsDebug knob (claim instrumentation): default OFF. With the knob off no
+// sink exists, so no stats-debug.log byte can ever be written.
+describe("statsDebug knob", () => {
+  test("off (default): sin sink — cero escrituras posibles", () => {
+    expect(statsDebugSinkFor(undefined)).toBeUndefined();
+    expect(statsDebugSinkFor(false)).toBeUndefined();
+    expect(statsDebugSinkFor(0)).toBeUndefined();
+    expect(statsDebugSinkFor("")).toBeUndefined();
+  });
+
+  test("truthy → sink; el knob viaja al capture sin romper la creación del plugin", async () => {
+    expect(typeof statsDebugSinkFor(true)).toBe("function");
+    expect(typeof statsDebugSinkFor(1)).toBe("function");
+    const plugin = await opencodeOllamaCloud(
+      {} as never,
+      {
+        statsDebug: true,
+      } as never,
+    );
+    expect((plugin as any).event).toBeTypeOf("function");
+  });
+
+  test("el sink acota el archivo (~256 KB) y nunca lanza", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "stats-debug-"));
+    const sink = createStatsDebugSink(dir);
+    expect(() => sink("claim test line")).not.toThrow();
+    // line > 256 KB → the file gets truncated FROM THE FRONT: the head line
+    // is gone by design, but the file never grows past the cap
+    expect(() => sink("x".repeat(300 * 1024))).not.toThrow();
+    const { statSync, readFileSync } = await import("node:fs");
+    const file = join(dir, "stats-debug.log");
+    expect(statSync(file).size).toBeLessThanOrEqual(260 * 1024);
+    expect(readFileSync(file, "utf8")).toContain("xxx");
   });
 });

@@ -5,103 +5,22 @@ import {
   PROVIDER_ID,
   loadCatalog,
   loadPricing,
-  type CatalogModel,
   type PluginOpts,
-  type PricingRate,
 } from "./catalog.ts";
 import { createStatsCapture, type FetchLike } from "./capture.ts";
+import { statsDebugSinkFor } from "./debug-sink.ts";
+import { toModelV2, zeroCost } from "./models.ts";
 import { pricingKnob } from "./tui-display.ts";
 
-// Catalog models without a rate in the pricing table and the models.dev
-// passthrough share the zero-cost shape (opencode's CostV2, USD per 1M
-// tokens). Factory, not constant: a shared mutable object would alias every
-// model's cost.
-const zeroCost = () => ({ input: 0, output: 0, cache: { read: 0, write: 0 } });
-
-const MODEL_OUTPUT_CAPS = {
-  text: true,
-  audio: false,
-  image: false,
-  video: false,
-  pdf: false,
-} as const;
-
-// opencode takes plugin-returned models verbatim (no ProviderTransform pass), so
-// the effort tiers the TUI rotates between only exist if we emit them ourselves.
-// { reasoningEffort } is the payload opencode computes for @ai-sdk/openai-compatible,
-// and ollama.com/v1 maps reasoning_effort (low|medium|high|max) to its native think level.
-export function toModelV2(
-  m: CatalogModel,
-  pricing: "off" | "on" = "on",
-  rate?: PricingRate,
-): ModelV2 {
-  const vision = m.capabilities.vision || m.input.includes("image");
-  const reasoning = m.capabilities.thinking;
-  // prices are USD per 1M tokens — opencode's CostV2 contract. The official
-  // Ollama Cloud rate is opt-out: default on, `pricing: "off"` keeps the
-  // counter at $0.00. A model without a table entry stays at $0 in both
-  // modes (no partial estimates). cachedInput feeds cache.read; cache.write
-  // stays 0 — the rate card publishes no cache-write column.
-  const official = pricing === "on" ? rate : undefined;
-  return {
-    id: m.id,
-    providerID: PROVIDER_ID,
-    api: {
-      id: m.id,
-      url: "https://ollama.com/v1",
-      npm: "@ai-sdk/openai-compatible",
-    },
-    name: m.name,
-    family: m.family,
-    capabilities: {
-      temperature: true,
-      reasoning,
-      attachment: vision,
-      toolcall: m.capabilities.tools,
-      // ollama's OpenAI-compatible endpoint reads prior-turn assistant
-      // thinking from each message's `reasoning` field (openai.go: Thinking:
-      // msg.Reasoning), not the `reasoning_content` field the AI SDK sends by
-      // default. Naming the field is what makes opencode route stored
-      // reasoning parts into a format ollama actually parses back in.
-      interleaved: reasoning ? { field: "reasoning" } : false,
-      input: {
-        text: true,
-        audio: false,
-        image: vision,
-        video: false,
-        pdf: false,
-      },
-      output: MODEL_OUTPUT_CAPS,
-    },
-    cost: official
-      ? {
-          ...zeroCost(),
-          input: official.input,
-          output: official.output,
-          cache: {
-            read: official.cachedInput ?? 0,
-            write: 0,
-          },
-        }
-      : zeroCost(),
-    limit: {
-      context: m.context,
-      output: m.maxOutput,
-    },
-    status: "active",
-    options: {},
-    headers: {},
-    release_date: m.releaseDate,
-    variants: Object.fromEntries(
-      // isCatalog only checks that reasoningOptions is an array; a hand-edited
-      // or custom-URL catalog could carry non-strings, and garbage effort keys
-      // would surface in the TUI picker and 400 upstream.
-      m.reasoningOptions
-        .filter((effort): effort is string => typeof effort === "string")
-        .map((effort) => [effort, { reasoningEffort: effort }]),
-    ),
-  };
-}
+// NOTE: export ONLY the plugin factory from this entry module. opencode's
+// legacy plugin path (packages/opencode/src/plugin/index.ts, getLegacyPlugins)
+// calls EVERY exported function of a plugin module as a plugin factory with
+// (PluginInput, options) whenever the default export is a function. Any extra
+// export here either crashes the whole load (createStatsDebugSink once
+// received the PluginInput object as `dir` and threw inside node:path join,
+// killing the plugin before `default` ever ran) or throws after registration
+// (the old toModelV2 error). toModelV2/zeroCost live in ./models.ts and the
+// statsDebug sink in ./debug-sink.ts — import them from there.
 
 // Pricing knob (opt-out): default on — the rate is the OFFICIAL Ollama Cloud
 // tariff (the public rate card), so only `off` turns it off. Legacy configs
@@ -120,11 +39,16 @@ const opencodeOllamaCloud: Plugin = async (_input, options) => {
   };
 
   const { id: _id, ...providerConfig } = PROVIDER_CONFIG;
-  // Stats capture (spec Pieza 1): wire wrapper for ollama-cloud + event sink.
-  // All failure paths live inside the capture; nothing here may throw.
-  // In "off" mode the capture is never created and the hooks below simply
-  // leave the plugin as it was before the stats effort.
-  const capture = stats === "on" ? createStatsCapture() : null;
+  // Stats capture (spec Pieza 1): wire wrapper for ollama-cloud + claim
+  // correlation sink. All failure paths live inside the capture; nothing here
+  // may throw. In "off" mode the capture is never created and the hooks below
+  // simply leave the plugin as it was before the stats effort.
+  const capture =
+    stats === "on"
+      ? createStatsCapture({
+          debugSink: statsDebugSinkFor(options?.statsDebug),
+        })
+      : null;
 
   return {
     ...(capture

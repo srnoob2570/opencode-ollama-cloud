@@ -7,10 +7,12 @@ import {
   formatRelativeAge,
   formatStatsDialogBody,
   formatStepRow,
+  pickSessionFile,
   pickTuiFeatures,
   pricingActive,
   pricingKnob,
 } from "./tui-display.ts";
+import type { HandoffFile } from "./handoff.ts";
 import type { SessionSummary, StepMeasurement } from "./stats.ts";
 
 const summary = (over: Partial<SessionSummary> = {}): SessionSummary => ({
@@ -59,30 +61,70 @@ describe("diálogo /stats (mock §2)", () => {
       "glm-5.3",
       NOW,
     );
-    expect(body).toContain("Session · glm-5.3");
+    // el promedio abarca cambios de modelo (sin desglose por diseño): el
+    // header solo atribuye el ÚLTIMO modelo, no es dueño de las cifras
+    expect(body).toContain("Session · last model glm-5.3");
     expect(body).toContain("38.2 tok/s · TTFT 380 ms · Session average");
     expect(body).toContain("5 responses · 1.8k t output");
     expect(body).toContain("1m ago   31.2 tok/s · TTFT 310 ms · 312 t");
   });
 
-  test("estado vacío textual", () => {
+  test("estado vacío textual; sin steps el header cae a —", () => {
     const body = formatStatsDialogBody(
       summary({ steps: 0 }),
       [],
       "glm-5.3",
       NOW,
     );
+    expect(body).toContain("Session · last model glm-5.3");
     expect(body).toContain(EMPTY_SESSION_LINE);
+    expect(formatStatsDialogBody(summary({ steps: 0 }), [])).toContain(
+      "Session · last model —",
+    );
   });
 
-  test("las mediciones event se marcan en el detalle", () => {
-    expect(formatStepRow(step({ source: "event" }), NOW)).toContain("(event)");
+  test("sin filas no queda separador huérfano bajo el head", () => {
+    const body = formatStatsDialogBody(summary(), [], "glm-5.3", NOW);
+    expect(body.endsWith("output")).toBe(true);
   });
 
-  test("ages legibles (relativo)", () => {
+  test("las respuestas directas (single-chunk) se marcan (direct)", () => {
+    expect(formatStepRow(step({ source: "wire-nostream" }), NOW)).toContain(
+      "(direct)",
+    );
+    expect(formatStepRow(step({ source: "wire" }), NOW)).not.toContain(
+      "(direct)",
+    );
+  });
+
+  test("ages legibles (relativo); futuro y presente → now", () => {
     expect(formatRelativeAge(NOW - 5_000, NOW)).toBe("5s ago");
     expect(formatRelativeAge(NOW - 90_000, NOW)).toBe("1m ago");
     expect(formatRelativeAge(NOW - 7_200_000, NOW)).toBe("2h 0m ago");
+    expect(formatRelativeAge(NOW + 30_000, NOW)).toBe("now");
+    expect(formatRelativeAge(NOW, NOW)).toBe("now");
+  });
+});
+
+describe("pickSessionFile (guard: sin sesión activa no se muestra NADA)", () => {
+  const file: HandoffFile = {
+    sessionID: "s1",
+    generatedAt: "2026-09-03T00:00:00.000Z",
+    summary: summary(),
+    steps: [],
+  };
+
+  test("sin sesión activa → null (el arranque nunca muestra un archivo)", () => {
+    expect(pickSessionFile(file, null)).toBeNull();
+  });
+
+  test("sesión coincidente → el archivo", () => {
+    expect(pickSessionFile(file, "s1")).toBe(file);
+  });
+
+  test("sesión distinta o archivo ausente → null", () => {
+    expect(pickSessionFile(file, "s2")).toBeNull();
+    expect(pickSessionFile(null, "s1")).toBeNull();
   });
 });
 
@@ -108,7 +150,9 @@ describe("ficha /model (mock §3 — tres estados de cuantización)", () => {
     const card = formatModelCard(model(), true);
     expect(card).toContain("FP8 (declared)");
     expect(card).toContain("quantization declared by Ollama. Does not");
+    // base decimal (1M = 1_000_000): 1_048_576 → 1M, 131_072 → 131k (no 128k)
     expect(card).toContain("1M");
+    expect(card).toContain("131k");
     expect(card).toContain(
       "Official rate     $0.7 in · $0.02 cached · $1.75 out per 1M",
     );

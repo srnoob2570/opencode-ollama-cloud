@@ -2,6 +2,7 @@
 // RATIFIED (wayfinder/prototipo-seccion-estadisticas.mock.md) — this module is
 // the string contract; the .tsx module only wires it into opencode's slots.
 // Pure by design: testable without opencode, no fs, no time.
+import type { HandoffFile } from "./handoff.ts";
 import type { SessionSummary, StepMeasurement } from "./stats.ts";
 
 export function formatLiveLine(summary: SessionSummary | null): string {
@@ -10,9 +11,28 @@ export function formatLiveLine(summary: SessionSummary | null): string {
   return `${summary.avgTps.toFixed(1)} tok/s · TTFT ${Math.round(summary.avgTtftMs)} ms · Session average`;
 }
 
+/**
+ * Session guard (cross-session staleness): while NO session is active the
+ * startup renders carry no session_id, so NOTHING may be shown — a stale file
+ * from a previous launch must never surface. And a file for another session
+ * is never this window's: one opencode window can never render another
+ * session's stats.
+ */
+export function pickSessionFile(
+  file: HandoffFile | null,
+  activeSessionID: string | null,
+): HandoffFile | null {
+  if (!activeSessionID || !file || file.sessionID !== activeSessionID)
+    return null;
+  return file;
+}
+
 /** Relative timestamp for the /stats dialog ("1m ago"), stable format. */
 export function formatRelativeAge(ts: number, now: number): string {
-  const s = Math.max(1, Math.round((now - ts) / 1000));
+  // clamp at 0: a future ts (clock skew; ts is the request start, now is
+  // sampled later) must read "now", never a fake "1s ago"
+  const s = Math.max(0, Math.round((now - ts) / 1000));
+  if (s === 0) return "now";
   if (s < 60) return `${s}s ago`;
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m ago`;
@@ -28,7 +48,10 @@ export function formatStepRow(step: StepMeasurement, now: number): string {
     step.decodeMs > 0
       ? (step.tokensOut / (step.decodeMs / 1000)).toFixed(1)
       : "—";
-  return `${formatRelativeAge(step.ts, now)}   ${tps} tok/s · TTFT ${Math.round(step.ttftMs)} ms · ${tokensLabel(step.tokensOut)} ${step.source === "event" ? "(event)" : ""}`;
+  // D1: a single-chunk response has decodeMs ≈ 0 → dash TPS is honest data,
+  // so the row carries the "(direct)" tag the event rows used to hold
+  const direct = step.source === "wire-nostream" ? " (direct)" : "";
+  return `${formatRelativeAge(step.ts, now)}   ${tps} tok/s · TTFT ${Math.round(step.ttftMs)} ms · ${tokensLabel(step.tokensOut)}${direct}`;
 }
 
 export const EMPTY_SESSION_LINE =
@@ -41,18 +64,20 @@ export function formatStatsDialogBody(
   modelID = "—",
   now = Date.now(),
 ): string {
+  // the session average spans model switches (no per-model breakdown by
+  // design), so the header only names the LAST model — it must not claim one
+  // model owns the whole session's numbers
   if (summary.steps === 0)
-    return `  Session · ${modelID}\n\n  ${EMPTY_SESSION_LINE}`;
+    return `  Session · last model ${modelID}\n\n  ${EMPTY_SESSION_LINE}`;
   const head = [
-    `  Session · ${modelID}`,
+    `  Session · last model ${modelID}`,
     "",
     `  ${summary.avgTps.toFixed(1)} tok/s · TTFT ${Math.round(summary.avgTtftMs)} ms · Session average`,
     `  ${summary.steps} responses · ${tokensLabel(summary.tokensOutTotal)} output`,
   ];
   const rows = steps.slice(0, 10).map((s) => `  ${formatStepRow(s, now)}`);
-  return [...head, rows.length ? "" : "", ...rows]
-    .filter((line) => line !== undefined)
-    .join("\n");
+  // one blank line between head and rows, only when there are rows to separate
+  return [...head, ...(rows.length ? [""] : []), ...rows].join("\n");
 }
 
 export interface ModelCard {
@@ -101,10 +126,12 @@ export function formatModelCard(model: ModelCard, pricingOn: boolean): string {
   return rows.join("\n");
 }
 
+// decimal base, matching tokensLabel above (k = 1_000, M = 1_000_000): the
+// card and the dialog must not run two different token scales side by side
 const formatTokens = (n: number): string =>
-  n >= 1024 * 1024
-    ? `${Math.round(n / (1024 * 1024))}M`
-    : `${Math.round(n / 1024)}k`;
+  n >= 1_000_000
+    ? `${Math.round(n / 1_000_000)}M`
+    : `${Math.round(n / 1_000)}k`;
 
 // Official Ollama Cloud rate — rate card column order: input / cached
 // input / output. A missing column renders as "—", never as 0.

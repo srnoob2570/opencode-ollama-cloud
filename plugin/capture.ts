@@ -1,13 +1,17 @@
 // Server side of the stats capture (spec Pieza 1): wire-accurate measurement
-// for ollama-cloud via a fetch wrapper, event-derived measurement for any
-// provider, and the per-session in-memory store that feeds the handoff.
-// Everything here is defensive: the plugin must never break a session over
-// stats. Verified opencode surfaces (fetch seam, event payloads, header
-// signals) are documented in research/capacidades-opencode-ui-stats.md.
-import type { RecordedChunk, StepMeasurement } from "./stats.ts";
+// for ollama-cloud via a fetch wrapper, the per-session in-memory store that
+// feeds the handoff, and the event sink that correlates wire measurements with
+// their assistant messages. The event-derived measurement route was RETIRED
+// (D2: stats measure ONLY ollama-cloud, and only through the wire). Everything
+// here is defensive: the plugin must never break a session over stats.
+// Verified opencode surfaces (fetch seam, event payloads, header signals) are
+// documented in research/capacidades-opencode-ui-stats.md.
+import type { RecordedChunk } from "./stats.ts";
 import {
   createStatsCollector,
+  isCompactionMessage,
   measurementFromWire,
+  type ClaimAttempt,
   type StatsCollector,
 } from "./stats.ts";
 import {
@@ -19,6 +23,7 @@ import {
 const CHAT_COMPLETIONS_SUFFIX = "/chat/completions";
 const PARENT_SESSION_HEADER = "x-parent-session-id";
 const SESSION_HEADER = "x-session-id";
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Read a possibly-untyped runtime field (the SDK typings lag opencode's schema). */
 const readStringField = (value: object, key: string): string | null => {
@@ -26,11 +31,25 @@ const readStringField = (value: object, key: string): string | null => {
   return typeof raw === "string" && raw.length > 0 ? raw : null;
 };
 
+/** message.time.created, or null when absent/non-positive (no time to correlate by). */
+const messageTimeCreatedOf = (
+  message: Record<string, unknown>,
+): number | null => {
+  const time = message.time as { created?: unknown } | undefined;
+  const created = time?.created;
+  return typeof created === "number" && Number.isFinite(created) && created > 0
+    ? created
+    : null;
+};
+
 /** fetch-assignable shape (Bun's typeof fetch adds preconnect). */
 export type FetchLike = (
   input: RequestInfo | URL,
   init?: RequestInit,
 ) => Promise<Response>;
+
+/** Diagnostics sink for claim attempts (statsDebug knob); must never throw. */
+export type DebugSink = (line: string) => void;
 
 export interface StatsCapture {
   /** Drop-in fetch for the provider options. Chains over `next` — a
@@ -78,22 +97,37 @@ const headerOf = (
   return null;
 };
 
+// Degradations are surfaced ONCE per process — a broken seam must not flood
+// opencode's logs, but the user deserves one honest hint that stats died.
+const warned = new Set<string>();
+const warnOnce = (message: string): void => {
+  if (warned.has(message)) return;
+  warned.add(message);
+  console.warn(`[opencode-ollama-cloud] ${message}`);
+};
+
 export const createStatsCapture = (
-  input: { now?: () => number; handoffDir?: string } = {},
+  input: {
+    now?: () => number;
+    handoffDir?: string;
+    debugSink?: DebugSink;
+  } = {},
 ) => {
   const now = input.now ?? (() => Date.now());
+  const debugSink = input.debugSink;
   const store = createHandoffStore(input.handoffDir);
+  // D3: retire the legacy single-slot stats.json and sweep stale per-session
+  // files once at startup — fire and forget, best-effort like every handoff path.
+  void store.cleanup(null, DAY_MS);
   const collectors = new Map<string, StatsCollector>();
   const sessions = new Map<
     string,
     { parentId: string | null; agent: string | null }
   >();
-  // event route (other providers): arrival time of the first part update
-  const firstPart = new Map<string, number>();
   // daemon-long maps need bounds: evict oldest on overflow (stats are
   // best-effort instrumentation, never allowed to leak memory)
   const MAX_Sessions = 500;
-  const MAX_FIRST_PART = 1000;
+  const MAX_COLLECTORS = 500;
 
   const rememberSession = (
     id: string,
@@ -108,21 +142,20 @@ export const createStatsCapture = (
     }
   };
 
-  const rememberFirstPart = (messageID: string, at: number) => {
-    firstPart.delete(messageID);
-    firstPart.set(messageID, at);
-    while (firstPart.size > MAX_FIRST_PART) {
-      const oldest = firstPart.keys().next();
-      if (oldest.done) break;
-      firstPart.delete(oldest.value);
-    }
-  };
-
   const collectorFor = (sessionID: string): StatsCollector => {
     let collector = collectors.get(sessionID);
     if (!collector) {
       collector = createStatsCollector(sessionID);
+      collectors.delete(sessionID); // re-insert to keep insertion order fresh
       collectors.set(sessionID, collector);
+      while (collectors.size > MAX_COLLECTORS) {
+        // evicting an ACTIVE session's collector loses its in-memory stats —
+        // acceptable: the daemon is best-effort instrumentation, and the map
+        // bound is what keeps a daemon-long process from leaking memory
+        const oldest = collectors.keys().next();
+        if (oldest.done) break;
+        collectors.delete(oldest.value);
+      }
     }
     return collector;
   };
@@ -137,14 +170,12 @@ export const createStatsCapture = (
     const collector = collectors.get(sessionID);
     if (!collector) return;
     const summary = collector.summary();
-    const fingerprint = `${summary.steps}:${summary.tokensOutTotal}:${summary.decodeMsTotal}`;
+    const fingerprint = `${summary.steps}:${summary.tokensOutTotal}:${summary.decodeMsTotal}:${Math.round(summary.avgTtftMs)}`;
     if (persistedFingerprint.get(sessionID) === fingerprint) return;
-    const current = await store.read();
-    if (
-      current &&
-      current.sessionID === sessionID &&
-      current.summary.steps > summary.steps
-    ) {
+    // per-session files narrow the guard to THIS session's snapshot: an on-disk
+    // state with more steps than memory (e.g. the plugin process restarted) wins
+    const current = await store.read(sessionID);
+    if (current && current.summary.steps > summary.steps) {
       persistedFingerprint.set(sessionID, fingerprint);
       return;
     }
@@ -155,6 +186,27 @@ export const createStatsCapture = (
       steps: collector.recent(MAX_HANDOFF_STEPS),
     });
     persistedFingerprint.set(sessionID, fingerprint);
+  };
+
+  // Claim instrumentation (statsDebug): one line per claim attempt — ISO time,
+  // session, agent, tokens, candidate pendings and the outcome. The sink is
+  // already failure-proof on its side; the guard here keeps a hostile sink
+  // from ever breaking a session.
+  const logClaim = (
+    sessionID: string,
+    agent: string | null,
+    tokensOut: number | null,
+    attempt: ClaimAttempt,
+  ): void => {
+    if (!debugSink) return;
+    const pends = attempt.pendings.map((p) => `${p.ts}:${p.source}`).join(" ");
+    try {
+      debugSink(
+        `claim session=${sessionID} agent=${agent ?? "-"} tokensOut=${tokensOut ?? "-"} pendings=${attempt.pendings.length} result=${attempt.result}${pends.length > 0 ? ` pends=[${pends}]` : ""}`,
+      );
+    } catch {
+      /* diagnostics must never break the capture */
+    }
   };
 
   const handleEvent = async (event: unknown): Promise<void> => {
@@ -190,26 +242,6 @@ export const createStatsCapture = (
         return;
       }
 
-      // first part-update marks TTFT candidate for the event route (payload:
-      // { sessionID, part, time } — part carries its own messageID/time)
-      if (type === "message.part.updated") {
-        const record = props as Record<string, unknown>;
-        const part = record.part as Record<string, unknown> | null;
-        const messageID =
-          part && typeof part === "object"
-            ? (readStringField(part, "messageID") ??
-              readStringField(part, "id"))
-            : null;
-        if (!messageID || firstPart.has(messageID)) return;
-        const partTime = (part as { time?: { start?: unknown } } | undefined)
-          ?.time?.start;
-        const at = [record.time, partTime].find(
-          (v): v is number => typeof v === "number" && v > 0,
-        );
-        if (at != null) rememberFirstPart(messageID, at);
-        return;
-      }
-
       if (type !== "message.updated") return;
       const info = (props as Record<string, unknown>).info;
       if (typeof info !== "object" || info === null) return;
@@ -225,32 +257,32 @@ export const createStatsCapture = (
       // main session's handoff)
       if (sessionInfo?.parentId) return;
 
+      // D2: message.updated does ONLY the wire claim now — a session without
+      // a collector has no wire measurement to correlate (other providers
+      // never reach here, and creating empty collectors would be pure waste)
+      const collector = collectors.get(sessionID);
+      if (!collector) return;
+
       const messageInfo = toAssistantMessageInfo(message, sessionID);
-      // compaction inherits the session model and completes like a real step —
-      // it must neither claim a pending wire measurement nor touch the handoff
-      const isCompaction =
-        messageInfo.agent === "compaction" ||
-        messageInfo.mode === "compaction" ||
-        messageInfo.summary === true;
-      if (isCompaction) return;
+      const isCompaction = isCompactionMessage(messageInfo);
 
       // the session's active agent: the first non-compaction assistant message
       // defines it (no constants — build/plan/custom agents exist)
-      if (sessionInfo && sessionInfo.agent == null && messageInfo.agent) {
+      if (
+        !isCompaction &&
+        sessionInfo &&
+        sessionInfo.agent == null &&
+        messageInfo.agent
+      ) {
         rememberSession(sessionID, {
           ...sessionInfo,
           agent: messageInfo.agent,
         });
       }
 
-      // --- event route (any provider), spec §1.2 ---------------------------
-      if (message.providerID !== "ollama-cloud") {
-        await ingestEventStep(sessionID, message);
-        return;
-      }
-
-      // --- wire correlation: newest unclaimed pending claim wins ------------
-      collectorFor(sessionID).claim({
+      // compaction reaches the claim too: its pending attaches and is dropped
+      // by the main-step gate (consumed, never leaked into the next real step)
+      const attempt = collector.claim({
         now: now(),
         sessionID,
         session: {
@@ -258,7 +290,15 @@ export const createStatsCapture = (
           agent: sessionInfo?.agent ?? messageInfo.agent,
         },
         message: messageInfo,
+        messageTimeCreated: messageTimeCreatedOf(message),
       });
+      const tokens = message.tokens as { output?: unknown } | undefined;
+      logClaim(
+        sessionID,
+        messageInfo.agent,
+        typeof tokens?.output === "number" ? tokens.output : null,
+        attempt,
+      );
       await persist(sessionID);
     } catch (error) {
       console.warn(
@@ -266,57 +306,6 @@ export const createStatsCapture = (
         error instanceof Error ? error.message : error,
       );
     }
-  };
-
-  // spec §1.2: TTFT ≈ first part.updated − time.created; TPS ≈ output tokens
-  // over completed − first part. tokens.output ≤ 0 means nothing was decoded
-  // (titlegen et al. produce no assistant message here at all).
-  const ingestEventStep = async (
-    sessionID: string,
-    message: Record<string, unknown>,
-  ): Promise<void> => {
-    const messageID = readStringField(message, "id");
-    if (!messageID) return;
-    const time = message.time as
-      { created?: unknown; completed?: unknown } | undefined;
-    const created = typeof time?.created === "number" ? time.created : null;
-    const completed =
-      typeof time?.completed === "number" ? time.completed : null;
-    const firstPartTime = firstPart.get(messageID);
-    const tokens = message.tokens as { output?: unknown } | undefined;
-    const tokensOut =
-      typeof tokens?.output === "number" && tokens.output > 0
-        ? tokens.output
-        : null;
-    if (
-      created == null ||
-      completed == null ||
-      firstPartTime == null ||
-      tokensOut == null
-    )
-      return;
-    firstPart.delete(messageID);
-    const measurement: StepMeasurement = {
-      sessionID,
-      providerID: readStringField(message, "providerID") ?? "unknown",
-      modelID: readStringField(message, "modelID") ?? "unknown",
-      ttftMs: Math.max(0, firstPartTime - created),
-      tokensOut,
-      decodeMs: Math.max(0, completed - firstPartTime),
-      source: "event",
-      ts: created,
-    };
-    collectorFor(sessionID).ingest(measurement, {
-      requestParentSessionId: null,
-      session: {
-        parentID: sessions.get(sessionID)?.parentId ?? null,
-        agent:
-          sessions.get(sessionID)?.agent ?? readStringField(message, "agent"),
-      },
-      message: toAssistantMessageInfo(message, sessionID),
-      sessionModelID: null,
-    });
-    await persist(sessionID);
   };
 
   // wireFetch chains over a user-configured fetch (proxy/CA/agent) when one
@@ -339,11 +328,19 @@ export const createStatsCapture = (
           ? input.href
           : input.url;
     if (!url.endsWith(CHAT_COMPLETIONS_SUFFIX)) return upstream(input, init);
-    // belt & suspenders vs the event route: child sessions never come to pend
+    // child sessions never come to pend (belt & suspenders)
     if (headerOf(input, init, PARENT_SESSION_HEADER))
       return upstream(input, init);
     const sessionID = headerOf(input, init, SESSION_HEADER);
-    if (!sessionID) return upstream(input, init);
+    if (!sessionID) {
+      // the opencode seam changed: chat requests always used to carry the
+      // session header. Without it there is nothing to correlate by — say so,
+      // once, instead of dying silently.
+      warnOnce(
+        "stats capture: request reached the provider fetch without x-session-id; stats disabled until restored",
+      );
+      return upstream(input, init);
+    }
     return measureSseFetch(
       sessionID,
       upstream,
@@ -372,14 +369,25 @@ export const createStatsCapture = (
     const finish = () => {
       if (measured) return;
       measured = true;
+      const t2 = now();
       const measurement = measurementFromWire({
         t0,
-        t2: now(),
+        t2,
         chunks,
         providerID: "ollama-cloud",
         modelID: "unknown",
       });
-      if (!measurement) return;
+      if (!measurement) {
+        // a stream that produced bytes but no usage payload would be dropped
+        // with no explanation — one hint is all the user gets
+        if (chunks.length > 0 && !chunks.some((c) => c.usage != null))
+          warnOnce(
+            "no usage chunk seen; steps will be dropped (include_usage missing?)",
+          );
+        return;
+      }
+      // the window anchors at the STREAM END (not the request start): a slow
+      // step must not have its pending expire while the stream is still open
       collectorFor(sessionID).pend(
         {
           ttftMs: measurement.ttftMs,
@@ -392,8 +400,7 @@ export const createStatsCapture = (
           sessionID,
           requestParentSessionId: null,
           sessionParentId: sessions.get(sessionID)?.parentId ?? null,
-          sessionModelID: null,
-          now: t0,
+          now: t2,
         },
       );
     };
@@ -462,5 +469,5 @@ export const createStatsCapture = (
     }
   };
 
-  return { wireFetch, handleEvent, store, collectors, sessions, firstPart };
+  return { wireFetch, handleEvent, store, collectors, sessions };
 };

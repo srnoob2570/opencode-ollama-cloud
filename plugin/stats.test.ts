@@ -35,7 +35,6 @@ const MAIN: Parameters<typeof isMainStep>[0] = {
     summary: null,
     modelID: "glm-5.3",
   },
-  sessionModelID: "glm-5.3",
 };
 
 describe("summarize (promedio de sesión)", () => {
@@ -67,6 +66,21 @@ describe("summarize (promedio de sesión)", () => {
       avgTtftMs: 0,
     });
   });
+
+  test("D1: a zero-decode step adds tokens but zero weight to the TPS", () => {
+    // non-stream step: decodeMs 0 contributes 0 to decodeMsTotal → its tokens
+    // ride along but never distort the tok/s; TTFT keeps the full latency
+    const s = summarize([
+      step({ tokensOut: 600, decodeMs: 10_000, ttftMs: 400 }),
+      step({ tokensOut: 8, decodeMs: 0, ttftMs: 900, source: "wire-nostream" }),
+    ]);
+    expect(s.decodeMsTotal).toBe(10_000);
+    // 608 tokens over the SAME 10 s — the zero-decode step adds tokens but no
+    // decode time, so the weighted TPS barely moves instead of being diluted
+    expect(s.avgTps).toBeCloseTo(60.8);
+    expect(s.avgTtftMs).toBeCloseTo(650); // simple mean over both steps
+    expect(s.steps).toBe(2);
+  });
 });
 
 describe("isMainStep (regla del chat principal, spec §1.3)", () => {
@@ -80,7 +94,7 @@ describe("isMainStep (regla del chat principal, spec §1.3)", () => {
     ).toBe(false);
   });
 
-  test("subagent event route: session has parentID", () => {
+  test("subagent session: session has parentID", () => {
     expect(
       isMainStep({ ...MAIN, session: { ...MAIN.session, parentID: "root" } }),
     ).toBe(false);
@@ -98,9 +112,7 @@ describe("isMainStep (regla del chat principal, spec §1.3)", () => {
         summary: true,
       },
     ])
-      expect(isMainStep({ ...MAIN, message, sessionModelID: "glm-5.3" })).toBe(
-        false,
-      );
+      expect(isMainStep({ ...MAIN, message })).toBe(false);
   });
 
   test("agent of the message must be the session's active agent (no constants)", () => {
@@ -130,12 +142,12 @@ describe("isMainStep (regla del chat principal, spec §1.3)", () => {
     ).toBe(true);
   });
 
-  test("modelID is a sanity check only (insufficient alone by design)", () => {
-    // compaction inherits the model; excluded above. A non-compaction message
-    // with a different model than the session choice drops out.
+  test("modelID is NOT a filter anymore (sanity-check retired, spec decision 4 withdrawn)", () => {
+    // a different model than the session's choice counts: compaction inherits
+    // the model, so this check never discriminated anything real
     expect(
       isMainStep({ ...MAIN, message: { ...MAIN.message, modelID: "kimi-k3" } }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   test("non-assistant roles never count", () => {
@@ -162,7 +174,13 @@ describe("claimPendingWire (titlegen se descarta por no correlacionar)", () => {
     },
     deadline: 31_000,
     sessionParentId: null,
-    sessionModelID: "glm-5.3",
+  };
+
+  const message = {
+    role: "assistant" as const,
+    agent: "build",
+    modelID: "glm-5.3",
+    providerID: "ollama-cloud",
   };
 
   test("attaches to the assistant message and passes the main-step gate", () => {
@@ -170,12 +188,8 @@ describe("claimPendingWire (titlegen se descarta por no correlacionar)", () => {
       now: 2000,
       sessionID: "s1",
       session: { parentID: null, agent: "build" },
-      message: {
-        role: "assistant",
-        agent: "build",
-        modelID: "glm-5.3",
-        providerID: "ollama-cloud",
-      },
+      message,
+      messageTimeCreated: 1500,
     });
     expect(claimed?.ttftMs).toBe(300);
     expect(claimed?.modelID).toBe("glm-5.3");
@@ -189,12 +203,8 @@ describe("claimPendingWire (titlegen se descarta por no correlacionar)", () => {
         now: 40_000,
         sessionID: "s1",
         session: { parentID: null, agent: "build" },
-        message: {
-          role: "assistant",
-          agent: "build",
-          modelID: "glm-5.3",
-          providerID: "ollama-cloud",
-        },
+        message,
+        messageTimeCreated: 1500,
       },
     );
     expect(claimed).toBeNull();
@@ -208,12 +218,8 @@ describe("claimPendingWire (titlegen se descarta por no correlacionar)", () => {
         now: 2000,
         sessionID: "s1",
         session: { parentID: null, agent: "build" },
-        message: {
-          role: "assistant",
-          agent: "build",
-          modelID: "glm-5.3",
-          providerID: "ollama-cloud",
-        },
+        message,
+        messageTimeCreated: 1500,
       },
     );
     expect(claimed).not.toBeNull();
@@ -224,13 +230,14 @@ describe("claimPendingWire (titlegen se descarta por no correlacionar)", () => {
 
 const makeCollector = () => ({ ...createStatsCollector("s1") });
 
-describe("StatsCollector (in-memory, vivo, sin persistencia)", () => {
-  test("ingesta directa con señales completas", () => {
-    const c = makeCollector();
-    c.ingest(step(), { ...MAIN });
-    expect(c.summary().steps).toBe(1);
-  });
+const MAIN_MESSAGE = {
+  role: "assistant" as const,
+  agent: "build",
+  modelID: "glm-5.3",
+  providerID: "ollama-cloud",
+};
 
+describe("StatsCollector (in-memory, vivo, sin persistencia)", () => {
   test("wire route: pend → claim promotes into steps", () => {
     const c = makeCollector();
     c.pend(
@@ -239,21 +246,17 @@ describe("StatsCollector (in-memory, vivo, sin persistencia)", () => {
         sessionID: "s1",
         requestParentSessionId: null,
         sessionParentId: null,
-        sessionModelID: "glm-5.3",
         now: 6,
       },
     );
-    c.claim({
+    const attempt = c.claim({
       now: 10,
       sessionID: "s1",
       session: { parentID: null, agent: "build" },
-      message: {
-        role: "assistant",
-        agent: "build",
-        modelID: "glm-5.3",
-        providerID: "ollama-cloud",
-      },
+      message: MAIN_MESSAGE,
+      messageTimeCreated: 8,
     });
+    expect(attempt.result).toBe("accepted");
     expect(c.summary().steps).toBe(1);
     expect(c.summary().tokensOutTotal).toBe(90);
   });
@@ -266,7 +269,6 @@ describe("StatsCollector (in-memory, vivo, sin persistencia)", () => {
         sessionID: "s1",
         requestParentSessionId: "root",
         sessionParentId: null,
-        sessionModelID: "glm-5.3",
         now: 6,
       },
     );
@@ -274,7 +276,8 @@ describe("StatsCollector (in-memory, vivo, sin persistencia)", () => {
       now: 10,
       sessionID: "s1",
       session: { parentID: null, agent: "build" },
-      message: { role: "assistant", agent: "build" },
+      message: MAIN_MESSAGE,
+      messageTimeCreated: 8,
     });
     expect(c.summary().steps).toBe(0);
   });
@@ -287,7 +290,6 @@ describe("StatsCollector (in-memory, vivo, sin persistencia)", () => {
         sessionID: "s1",
         requestParentSessionId: null,
         sessionParentId: null,
-        sessionModelID: "glm-5.3",
         now: 6,
       },
     );
@@ -296,19 +298,89 @@ describe("StatsCollector (in-memory, vivo, sin persistencia)", () => {
       now: 999_001,
       sessionID: "s1",
       session: { parentID: null, agent: "build" },
-      message: { role: "assistant", agent: "build" },
+      message: MAIN_MESSAGE,
+      messageTimeCreated: 998_000,
     });
     expect(c.summary().steps).toBe(0);
   });
 
   test("recent returns newest-first for the /stats dialog", () => {
     const c = makeCollector();
-    const base = step({});
-    c.ingest({ ...base, ts: base.ts + 2000 }, { ...MAIN });
-    c.ingest({ ...base, ts: base.ts + 1000 }, { ...MAIN });
+    // two claims with different ts (pend → claim exercises the wire path)
+    const pendStep = (ts: number, tokens: number) => {
+      c.pend(
+        {
+          ttftMs: 250,
+          tokensOut: tokens,
+          decodeMs: 3_000,
+          source: "wire",
+          ts,
+        },
+        {
+          sessionID: "s1",
+          requestParentSessionId: null,
+          sessionParentId: null,
+          now: ts,
+        },
+      );
+      c.claim({
+        now: ts + 5_000,
+        sessionID: "s1",
+        session: { parentID: null, agent: "build" },
+        message: MAIN_MESSAGE,
+        messageTimeCreated: ts + 1_000,
+      });
+    };
+    pendStep(1_790_000_000_000 + 1000, 10);
+    pendStep(1_790_000_000_000 + 2000, 20);
     const recent = c.recent(5);
     expect(recent).toHaveLength(2);
-    expect(recent[0].ts).toBe(base.ts + 2000);
+    expect(recent[0].ts).toBe(1_790_000_000_000 + 2000);
+  });
+});
+
+describe("resumen con totales corridos (>500 steps)", () => {
+  test("summary() === summarize(sobre TODOS los steps jamás insertados)", () => {
+    const c = makeCollector();
+    const all: StepMeasurement[] = [];
+    for (let i = 0; i < 600; i++) {
+      const now = 10_000 + i * 100;
+      c.pend(
+        {
+          ttftMs: 200 + (i % 7) * 10,
+          tokensOut: 50 + i,
+          decodeMs: 4_000 + i,
+          source: i % 9 === 0 ? "wire-nostream" : "wire",
+          ts: now,
+        },
+        {
+          sessionID: "s1",
+          requestParentSessionId: null,
+          sessionParentId: null,
+          now,
+        },
+      );
+      c.claim({
+        now: now + 90,
+        sessionID: "s1",
+        session: { parentID: null, agent: "build" },
+        message: MAIN_MESSAGE,
+        messageTimeCreated: now + 50,
+      });
+      all.push({
+        sessionID: "s1",
+        providerID: "ollama-cloud",
+        modelID: MAIN_MESSAGE.modelID,
+        ttftMs: 200 + (i % 7) * 10,
+        tokensOut: 50 + i,
+        decodeMs: 4_000 + i,
+        source: i % 9 === 0 ? "wire-nostream" : "wire",
+        ts: now,
+      });
+    }
+    // capped in-memory list, exact running totals
+    expect(c.summary()).toEqual(summarize(all));
+    expect(c.recent(1000).length).toBeLessThanOrEqual(500);
   });
 });
 
@@ -331,7 +403,7 @@ describe("measurementFromWire (extracción pura del stream)", () => {
     expect(m?.source).toBe("wire");
   });
 
-  test("single-chunk response is wire-nostream and counts total latency as decode", () => {
+  test("D1: single-chunk response is wire-nostream, decode ≈ 0 and TTFT is the full latency", () => {
     const m = measurementFromWire({
       t0: 1000,
       t2: 1900,
@@ -340,8 +412,20 @@ describe("measurementFromWire (extracción pura del stream)", () => {
       modelID: "glm-5.3",
     });
     expect(m?.source).toBe("wire-nostream");
-    expect(m?.ttftMs).toBe(900);
-    expect(m?.decodeMs).toBe(900);
+    expect(m?.ttftMs).toBe(900); // request → (only) token = full latency
+    expect(m?.decodeMs).toBe(0); // t2 − first.t ≈ 0 — TPS never penalizes TTFT
+  });
+
+  test("zero output tokens → no step (unifica la regla con la ruta retirada)", () => {
+    expect(
+      measurementFromWire({
+        t0: 0,
+        t2: 100,
+        chunks: [{ t: 50, usage: { completion_tokens: 0 } }],
+        providerID: "p",
+        modelID: "m",
+      }),
+    ).toBeNull();
   });
 
   test("no usage anywhere → no measurement (tokens unknown, never guessed)", () => {
@@ -356,7 +440,8 @@ describe("measurementFromWire (extracción pura del stream)", () => {
     ).toBeNull();
   });
 });
-describe("claimPendingWire — contrato newest-wins", () => {
+
+describe("claimPendingWire — correlación por tiempo (tolerancia 2 s)", () => {
   const pend = (ts: number, over: Record<string, unknown> = {}) => ({
     sessionID: "s1",
     measurement: {
@@ -368,26 +453,130 @@ describe("claimPendingWire — contrato newest-wins", () => {
     },
     deadline: Number.MAX_SAFE_INTEGER,
     sessionParentId: null as string | null,
-    sessionModelID: "glm-5.3",
     ...over,
   });
+  const message = {
+    role: "assistant" as const,
+    agent: "build",
+    modelID: "glm-5.3",
+    providerID: "ollama-cloud",
+  };
 
-  test("dos pendings no reclamados (aborto + reintento): reclama el MÁS NUEVO", () => {
+  test("messageTimeCreated null → fallback newest-wins (contrato legacy)", () => {
     const older = pend(1); // intento abortado
     const newer = pend(2); // reintento — el mensaje completado es el último
     const { claimed, rest } = claimPendingWire([older, newer], {
       now: 2_000,
       sessionID: "s1",
       session: { parentID: null, agent: "build" },
-      message: {
-        role: "assistant",
-        agent: "build",
-        modelID: "glm-5.3",
-        providerID: "ollama-cloud",
-      },
+      message,
+      messageTimeCreated: null,
     });
     expect(claimed?.tokensOut).toBe(newer.measurement.tokensOut);
     expect(claimed?.ts).toBe(newer.measurement.ts);
     expect(rest.map((p) => p.measurement.ts)).toEqual([older.measurement.ts]);
+  });
+
+  test("a: dos pendings (abortado viejo + real nuevo) correlacionan cada uno con SU mensaje", () => {
+    const aborted = pend(1_000); // intento abortado, stream acabó a los 1 s
+    const real = pend(5_000); // reintento real
+    // el mensaje del intento abortado (time.created ≈ su request) NO puede
+    // robar el pending del reintento: su ventana de tolerancia termina en 3.1 s
+    const first = claimPendingWire([aborted, real], {
+      now: 6_000,
+      sessionID: "s1",
+      session: { parentID: null, agent: "build" },
+      message,
+      messageTimeCreated: 1_100,
+    });
+    expect(first.claimed?.ts).toBe(aborted.measurement.ts);
+    expect(first.rest.map((p) => p.measurement.ts)).toEqual([
+      real.measurement.ts,
+    ]);
+    // el mensaje real llega después y reclama el SUYO
+    const second = claimPendingWire(first.rest, {
+      now: 6_500,
+      sessionID: "s1",
+      session: { parentID: null, agent: "build" },
+      message,
+      messageTimeCreated: 5_100,
+    });
+    expect(second.claimed?.ts).toBe(real.measurement.ts);
+    expect(second.rest).toEqual([]);
+  });
+
+  test("a2: el mensaje nuevo NUNCA reclama el pending abortado viejo si el real está dentro de tolerancia", () => {
+    const aborted = pend(1_000);
+    const real = pend(5_000);
+    const { claimed, rest } = claimPendingWire([aborted, real], {
+      now: 6_000,
+      sessionID: "s1",
+      session: { parentID: null, agent: "build" },
+      message,
+      messageTimeCreated: 5_100, // límite 7.1 s: ambos caben, gana el ts MAYOR
+    });
+    expect(claimed?.ts).toBe(real.measurement.ts);
+    expect(rest.map((p) => p.measurement.ts)).toEqual([aborted.measurement.ts]);
+  });
+
+  test("b: compaction y step real conviven — cada message.updated reclama el suyo", () => {
+    const compactionReq = pend(1_000); // el request wire de la compaction
+    const realReq = pend(5_000); // el request del step real
+    // 1) el message.updated de la compaction reclama SU pending y lo rechaza
+    //    (isMainStep) — el pending se consume y desaparece
+    const compactionClaim = claimPendingWire([compactionReq, realReq], {
+      now: 6_000,
+      sessionID: "s1",
+      session: { parentID: null, agent: "build" },
+      message: { ...message, agent: "compaction", mode: "compaction" },
+      messageTimeCreated: 1_100,
+    });
+    expect(compactionClaim.claimed).toBeNull(); // rechazada por la regla
+    expect(compactionClaim.claimedPending?.measurement.ts).toBe(1_000);
+    expect(compactionClaim.rest.map((p) => p.measurement.ts)).toEqual([5_000]);
+    // 2) el step real reclama SU pending y pasa la regla
+    const realClaim = claimPendingWire(compactionClaim.rest, {
+      now: 6_500,
+      sessionID: "s1",
+      session: { parentID: null, agent: "build" },
+      message,
+      messageTimeCreated: 5_100,
+    });
+    expect(realClaim.claimed?.ts).toBe(5_000);
+    expect(realClaim.rest).toEqual([]);
+  });
+
+  test("ningún pending dentro de la tolerancia → no claim (no newest-wins ciego)", () => {
+    // el message.updated pertenece a un mensaje ANTERIOR (mtc=1000) que llega
+    // tarde: el pend del request en vuelo (ts=5000) queda FUERA de su ventana
+    // (ts > mtc + 2 s) y no se lo puede llevar
+    const inflight = pend(5_000);
+    const { claimed, claimedPending, rest } = claimPendingWire([inflight], {
+      now: 6_000,
+      sessionID: "s1",
+      session: { parentID: null, agent: "build" },
+      message,
+      messageTimeCreated: 1_000,
+    });
+    expect(claimed).toBeNull();
+    expect(claimedPending).toBeNull();
+    expect(rest).toHaveLength(1); // ni siquiera se consume
+  });
+
+  test("rejection by the main-step gate still CONSUMES the pending (compaction se come el suyo)", () => {
+    const compactionReq = pend(1_000);
+    const { claimed, claimedPending, rest } = claimPendingWire(
+      [compactionReq],
+      {
+        now: 2_000,
+        sessionID: "s1",
+        session: { parentID: null, agent: "build" },
+        message: { ...message, agent: "compaction" },
+        messageTimeCreated: 1_100,
+      },
+    );
+    expect(claimed).toBeNull();
+    expect(claimedPending).not.toBeNull();
+    expect(rest).toEqual([]);
   });
 });

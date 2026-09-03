@@ -23,7 +23,9 @@
   },
   "files": [
     "plugin/catalog.ts",
+    "plugin/debug-sink.ts",
     "plugin/index.ts",
+    "plugin/models.ts",
     "plugin/stats.ts",
     "plugin/capture.ts",
     "plugin/handoff.ts",
