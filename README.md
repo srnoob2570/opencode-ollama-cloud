@@ -110,18 +110,28 @@ The plugin measures what opencode doesn't: **TTFT** (time to first token) and **
 - `/stats` — session summary plus the latest responses (step-level detail; `wire` vs `event` rows are distinguishable).
 - `/model` — model card of the active model: quantization, family, capabilities, limits, release date and the official rate (input · cached input · output per 1M; unless `pricing: "off"`).
 
-The average only counts the **main conversation**: subagents, title generation and compaction never enter it (measured signals verified against opencode's source). Numbers are in-memory per session — nothing is stored, and nothing is sent anywhere. The stats UI ships as a second plugin entry and degrades silently: on an opencode the TUI API moved in, the provider/catalog keep working and stats simply vanish (tested against opencode **1.18.25**; the plugin API it uses is present-but-undocumented there, so treat stats UI as best-effort until upstream documents it).
+The average only counts the **main conversation**: subagents, title generation and compaction never enter it (measured signals verified against opencode's source). Numbers are in-memory per session — nothing is stored, and nothing is sent anywhere. The stats UI ships as a second plugin entry and degrades silently: on an opencode the TUI API moved in, the provider/catalog keep working and stats simply vanish (tested against opencode **1.18.27**; the plugin API it uses is present-but-undocumented there, so treat stats UI as best-effort until upstream documents it).
+
+The provider entry stays in `opencode.json`'s `plugin` array as usual. **The TUI entry goes in `tui.json`**: since opencode 1.18, the TUI host only loads its plugins from `~/.config/opencode/tui.json` (or the project's) — the `plugin` array in `opencode.json` is ignored on the TUI side.
+
+opencode.json:
 
 ```json
 {
-  "plugin": [
-    ["@srnoob2570/opencode-ollama-cloud", {}],
-    ["@srnoob2570/opencode-ollama-cloud/tui", {}]
-  ]
+  "plugin": [["@srnoob2570/opencode-ollama-cloud", {}]]
 }
 ```
 
-- `stats`: `"on"` (default) or `"off"` — set it on **both** entries turns everything off: no measurement, no UI, exactly yesterday's plugin.
+~/.config/opencode/tui.json (a plain file path is the verified form; with an npm install, point it at `tui.tsx` inside the installed package):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["/absolute/path/to/opencode-ollama-cloud/plugin/tui.tsx"]
+}
+```
+
+- `stats`: `"on"` (default) or `"off"` — set it on **both** entries (tuple form, e.g. `["…", { "stats": "off" }]`) turns everything off: no measurement, no UI, exactly yesterday's plugin.
 
 ### Quantization disclosure
 

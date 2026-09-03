@@ -125,20 +125,36 @@ Los números viven en memoria por sesión — no se persiste nada ni sale nada d
 tu máquina. La UI de stats es una segunda entrada de plugin y degrada en
 silencio: en un opencode donde la API TUI cambió, provider/catálogo siguen
 funcionando y las stats simplemente desaparecen (probado contra opencode
-**1.18.25**; la API que usa existe pero no está documentada — stats UI es
+**1.18.27**; la API que usa existe pero no está documentada — stats UI es
 best-effort hasta que upstream la documente).
+
+La entrada del provider vive en el array `plugin` de `opencode.json`, como
+siempre. **La entrada de la TUI va en `tui.json`**: desde opencode 1.18, el
+host TUI solo carga sus plugins desde `~/.config/opencode/tui.json` (o el del
+proyecto) — el array `plugin` de `opencode.json` se ignora en el lado TUI.
+
+opencode.json:
 
 ```json
 {
-  "plugin": [
-    ["@srnoob2570/opencode-ollama-cloud", {}],
-    ["@srnoob2570/opencode-ollama-cloud/tui", {}]
-  ]
+  "plugin": [["@srnoob2570/opencode-ollama-cloud", {}]]
 }
 ```
 
-- `stats`: `"on"` (default) o `"off"` — ponlo en **ambas entradas** y todo se
-  apaga: sin medición, sin UI, exactamente el plugin de siempre.
+~/.config/opencode/tui.json (una ruta de archivo directa es la forma
+verificada; con instalación por npm, apúntala al `tui.tsx` dentro del paquete
+instalado):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["/ruta/absoluta/a/opencode-ollama-cloud/plugin/tui.tsx"]
+}
+```
+
+- `stats`: `"on"` (default) o `"off"` — ponlo en **ambas entradas** (forma de
+  tupla, p. ej. `["…", { "stats": "off" }]`) y todo se apaga: sin medición,
+  sin UI, exactamente el plugin de siempre.
 
 ### Cuantización: declarada, no garantizada
 

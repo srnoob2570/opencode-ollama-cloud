@@ -5,6 +5,16 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-09-03
+
+### Fixed
+
+- Cancelling a request no longer prints `no usage chunk seen; steps will be dropped (include_usage missing?)`. Aborted and cancelled streams never receive the final usage chunk by design, so they are dropped silently; the one-time hint now fires only when a stream completes naturally without a usage chunk — the actual diagnostic case.
+
+### Changed
+
+- Documentation: the TUI plugin entry must be registered in `tui.json` — since opencode 1.18 the TUI host only loads its plugins from `~/.config/opencode/tui.json` (or the project's), never from the `plugin` array in `opencode.json`. The README examples now show the verified setup (provider entry in `opencode.json`, plain file path for `tui.tsx` in `tui.json`), and the tested version is updated to opencode 1.18.27.
+
 ## [0.1.7] - 2026-09-03
 
 ### Added

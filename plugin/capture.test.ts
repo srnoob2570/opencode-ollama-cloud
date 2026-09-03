@@ -311,6 +311,38 @@ describe("createStatsCapture — captura wire → handoff", () => {
     }
   });
 
+  test("un stream cancelado sin usage chunk se descarta en silencio", async () => {
+    const dir = await tempDir();
+    const capture = createStatsCapture({ handoffDir: dir });
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      sseResponse([
+        `data: {"id":"x","choices":[{"delta":{"content":"h"}}]}\n\n`,
+        `data: {"id":"x","choices":[{"delta":{"content":"i"}}]}\n\n`,
+      ])) as unknown as typeof fetch;
+    const warnings: unknown[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args);
+    try {
+      await capture.handleEvent(ROOT_SESSION_EVENT);
+      const response = await capture.wireFetch(
+        wireRequest({ "x-session-id": "s-root" }),
+        { method: "POST" },
+      );
+      const reader = response.body!.getReader();
+      await reader.read();
+      // cancelación de usuario: el usage final nunca llega y eso es normal,
+      // no un diagnóstico — se descarta sin avisar
+      await reader.cancel();
+      await settle(50);
+      expect(warnings.join(" ")).not.toContain("no usage chunk seen");
+      expect(capture.collectors.get("s-root")?.summary().steps ?? 0).toBe(0);
+    } finally {
+      console.warn = originalWarn;
+      globalThis.fetch = original;
+    }
+  });
+
   test("statsDebug: el sink inyectado recibe una línea por intento de claim", async () => {
     const dir = await tempDir();
     const lines: string[] = [];

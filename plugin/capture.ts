@@ -366,6 +366,8 @@ export const createStatsCapture = (
     const decoder = new TextDecoder();
     let buffer = "";
     let measured = false;
+    let ended = false;
+    let aborted = false;
     const finish = () => {
       if (measured) return;
       measured = true;
@@ -379,8 +381,15 @@ export const createStatsCapture = (
       });
       if (!measurement) {
         // a stream that produced bytes but no usage payload would be dropped
-        // with no explanation — one hint is all the user gets
-        if (chunks.length > 0 && !chunks.some((c) => c.usage != null))
+        // with no explanation — one hint is all the user gets. Aborted or
+        // cancelled streams never receive the final usage chunk by design, so
+        // they stay silent: a user cancellation is not a diagnostic event.
+        if (
+          ended &&
+          !aborted &&
+          chunks.length > 0 &&
+          !chunks.some((c) => c.usage != null)
+        )
           warnOnce(
             "no usage chunk seen; steps will be dropped (include_usage missing?)",
           );
@@ -445,8 +454,9 @@ export const createStatsCapture = (
           }
           // flush a final data line that arrived without its trailing newline
           consume(decoder.decode());
+          ended = true;
         } catch {
-          /* aborted stream: measure what actually arrived */
+          aborted = true; /* aborted stream: measure what actually arrived */
         }
         try {
           controller.close();
@@ -457,6 +467,7 @@ export const createStatsCapture = (
         void persist(sessionID);
       },
       cancel() {
+        aborted = true; // consumer cancelled: drop silently, never warn
         finish();
       },
     });
