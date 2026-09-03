@@ -5,9 +5,27 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-09-03
+
 ### Added
 
 - `update-pricing` GitHub Actions workflow. Refreshing the rate card is now a manual run from the Actions tab (or `gh workflow run update-pricing`): the workflow fetches Ollama's live pricing page, prints every rate that changed, commits the refreshed `catalog/pricing.json` and purges the jsDelivr cache. It never runs on a schedule, and the local `bun run update-pricing` still works the same way.
+- `statsDebug` plugin option. When set, the server appends one line per claim attempt (pendings seen, result, per-step source and timestamps) to a bounded `stats-debug.log` in the plugin cache dir, default off — the tool for diagnosing a missing step.
+
+### Fixed
+
+- The plugin could stop loading entirely. opencode's legacy loader calls every exported function of a plugin entry module as a plugin factory, so the new `createStatsDebugSink` export (sorting before `default`) received the loader's input object as its directory argument and crashed the whole load — no hooks, no measurements, dashes forever. The helpers now live in `plugin/models.ts` and `plugin/debug-sink.ts`; the entry module exports only the plugin factory. (The old `toModelV2` export had the same latent bug, harmless only because `default` ran first.)
+- Stats timing. A response that took longer than 30 s used to vanish from the session average because the pending window was anchored at request start; it now anchors at stream end. Single-chunk responses (`wire-nostream`) no longer fold the whole wait into the session TPS: decode time is measured from first chunk to stream end, as the metric is defined, and those rows carry a `(direct)` tag in `/stats`. Zero-token steps (`completion_tokens: 0`) are rejected consistently instead of entering the average.
+- Cross-session leaks. The handoff is one file per session (`stats-<sessionID>.json`), so a concurrent session can no longer clobber another session's stats, the TUI shows dashes instead of another session's numbers at startup, and stale files older than 24 h plus the legacy single-slot `stats.json` are cleaned up.
+- Claim correlation. Pending wire measurements now correlate to their assistant message by time (largest `ts` at or before the message's `time.created`, 2 s tolerance) instead of blind newest-wins, so an early update for an aborted attempt can't count a stale measurement, and an overlapping compaction pending is consumed and dropped.
+- `/stats` no longer attributes a mixed-model session average to one model — the header reads `Session · last model <id>` — and the dialog body refreshes every second while it stays open.
+- The TUI unsubscribes its event handlers and stops its poll timer on dispose (reload-safe), and refresh errors are reported through opencode's log too, not only the private debug file.
+
+### Changed
+
+- Stats measure ollama-cloud only. The event-based estimation for other providers is retired, together with its `(event)` tag and the untyped runtime fields it relied on; every measured step now comes off the wire. Ratified in the spec (decisions D1–D3, 2026-09-03).
+- Token sizes in the `/model` card use the same decimal base (1 000) as the stats instead of binary (1 024).
+- Server-side bookkeeping is bounded: at most 500 session collectors and 500 steps per session, with exact running totals so the session summary is unchanged. When the opencode seam stops delivering the session header or the usage chunk, the server logs a one-time warning instead of silently freezing the live line on dashes.
 
 ## [0.1.6] - 2026-09-01
 
@@ -109,7 +127,8 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 - README in English and Spanish.
 - CI refreshes the catalog on a schedule and verifies the catalog before publishing.
 
-[Unreleased]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.3...v0.1.4
