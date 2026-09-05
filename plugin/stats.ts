@@ -305,11 +305,10 @@ export const createStatsCollector = (sessionID: string): StatsCollector => {
       pending = result.rest;
       let claimResult: ClaimResult = "none";
       if (result.claimedPending) {
-        claimResult = result.claimed
-          ? "accepted"
-          : isCompactionMessage(input.message)
-            ? "rejected-compaction"
-            : "rejected-gate";
+        if (result.claimed) claimResult = "accepted";
+        else if (isCompactionMessage(input.message))
+          claimResult = "rejected-compaction";
+        else claimResult = "rejected-gate";
       }
       if (result.claimed) remember(result.claimed);
       return { pendings, result: claimResult };

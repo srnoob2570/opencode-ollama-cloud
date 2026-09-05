@@ -83,6 +83,10 @@ const CACHE_DIR = join(homedir(), ".cache", "opencode-ollama-cloud");
 const CACHE_FILE = join(CACHE_DIR, "catalog.json");
 const PRICING_CACHE_FILE = join(CACHE_DIR, "pricing.json");
 
+/** Positive finite number — the invariant every rate-card row must carry. */
+const positiveFinite = (value: unknown): boolean =>
+  typeof value === "number" && Number.isFinite(value) && value > 0;
+
 export function isPricingTable(value: unknown): value is PricingTable {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     return false;
@@ -94,14 +98,9 @@ export function isPricingTable(value: unknown): value is PricingTable {
     .filter(([key]) => key !== "$schema")
     .every(
       ([, r]) =>
-        typeof r?.input === "number" &&
-        Number.isFinite(r.input) &&
-        r.input > 0 &&
-        typeof r?.output === "number" &&
-        Number.isFinite(r.output) &&
-        r.output > 0 &&
-        (r.cachedInput === undefined ||
-          (Number.isFinite(r.cachedInput) && r.cachedInput > 0)) &&
+        positiveFinite(r?.input) &&
+        positiveFinite(r?.output) &&
+        (r.cachedInput === undefined || positiveFinite(r.cachedInput)) &&
         (r.unit === undefined || r.unit === "per-1M") &&
         (r.source === undefined || typeof r.source === "string") &&
         (r.asOf === undefined || typeof r.asOf === "string"),

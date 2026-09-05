@@ -106,6 +106,17 @@ const warnOnce = (message: string): void => {
   console.warn(`[opencode-ollama-cloud] ${message}`);
 };
 
+// Bound for the daemon-long session maps: evict the oldest (insertion-order
+// first) entry on overflow — stats are best-effort instrumentation, never
+// allowed to leak memory.
+const evictOldest = <V>(map: Map<string, V>, max: number): void => {
+  while (map.size > max) {
+    const oldest = map.keys().next();
+    if (oldest.done) break;
+    map.delete(oldest.value);
+  }
+};
+
 export const createStatsCapture = (
   input: {
     now?: () => number;
@@ -124,9 +135,8 @@ export const createStatsCapture = (
     string,
     { parentId: string | null; agent: string | null }
   >();
-  // daemon-long maps need bounds: evict oldest on overflow (stats are
-  // best-effort instrumentation, never allowed to leak memory)
-  const MAX_Sessions = 500;
+  // daemon-long maps need bounds: evict oldest on overflow (see evictOldest)
+  const MAX_SESSIONS = 500;
   const MAX_COLLECTORS = 500;
 
   const rememberSession = (
@@ -135,11 +145,7 @@ export const createStatsCapture = (
   ) => {
     sessions.delete(id); // re-insert to keep insertion order fresh
     sessions.set(id, entry);
-    while (sessions.size > MAX_Sessions) {
-      const oldest = sessions.keys().next();
-      if (oldest.done) break;
-      sessions.delete(oldest.value);
-    }
+    evictOldest(sessions, MAX_SESSIONS);
   };
 
   const collectorFor = (sessionID: string): StatsCollector => {
@@ -148,14 +154,10 @@ export const createStatsCapture = (
       collector = createStatsCollector(sessionID);
       collectors.delete(sessionID); // re-insert to keep insertion order fresh
       collectors.set(sessionID, collector);
-      while (collectors.size > MAX_COLLECTORS) {
-        // evicting an ACTIVE session's collector loses its in-memory stats —
-        // acceptable: the daemon is best-effort instrumentation, and the map
-        // bound is what keeps a daemon-long process from leaking memory
-        const oldest = collectors.keys().next();
-        if (oldest.done) break;
-        collectors.delete(oldest.value);
-      }
+      // evicting an ACTIVE session's collector loses its in-memory stats —
+      // acceptable: the daemon is best-effort instrumentation, and the map
+      // bound is what keeps a daemon-long process from leaking memory
+      evictOldest(collectors, MAX_COLLECTORS);
     }
     return collector;
   };

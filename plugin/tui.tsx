@@ -20,17 +20,15 @@ import {
   resolveSessionID,
   type ModelCard,
 } from "./tui-display.ts";
-import { createHandoffStore, type HandoffFile } from "./handoff.ts";
-import { readUpdateRecord } from "./self-update.ts";
 import {
-  loadCatalog,
-  loadPricing,
-  type Catalog as CatalogModel2,
-  type PricingTable,
-} from "./catalog.ts";
+  createHandoffStore,
+  DEFAULT_HANDOFF_DIR,
+  type HandoffFile,
+} from "./handoff.ts";
+import { readUpdateRecord } from "./self-update.ts";
+import { loadCatalog, loadPricing, type Catalog } from "./catalog.ts";
 import type { SessionSummary } from "./stats.ts";
-import { appendFileSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { DEFAULT_HANDOFF_DIR } from "./handoff.ts";
+import { appendBoundedLog } from "./debug-sink.ts";
 import { join } from "node:path";
 
 interface TuiLike {
@@ -81,24 +79,14 @@ const ZERO_SUMMARY: SessionSummary = {
 
 // TUI-process diagnostics: the plugin logs go to opencode's files, but THIS
 // module runs in the TUI process whose failures show no trace there — mirror
-// omo-slim's own-log pattern (append-only, bounded) so failures are legible.
+// omo-slim's own-log pattern (append-only, bounded — appendBoundedLog) so
+// failures are legible.
 const DEBUG_FILE = join(DEFAULT_HANDOFF_DIR, "tui-debug.log");
-const debug = (...message: unknown[]) => {
-  try {
-    appendFileSync(
-      DEBUG_FILE,
-      `[${new Date().toISOString()}] ${message.map(String).join(" ")}\n`,
-    );
-    // bounded: drop the head when the log grows past ~256 KB
-    const size = statSync(DEBUG_FILE).size;
-    if (size > 256 * 1024) {
-      const tail = readFileSync(DEBUG_FILE, "utf8").slice(-128 * 1024);
-      writeFileSync(DEBUG_FILE, tail);
-    }
-  } catch {
-    /* logging must never break rendering */
-  }
-};
+const debug = (...message: unknown[]) =>
+  appendBoundedLog(
+    DEBUG_FILE,
+    `[${new Date().toISOString()}] ${message.map(String).join(" ")}\n`,
+  );
 
 // the live slot is the only component that knows the active session; dialogs
 // reuse it so one opencode window can never render another session's stats
@@ -157,35 +145,25 @@ const logToOpencode = (api: TuiLike, ...message: unknown[]): void => {
 // once at module entry; a custom catalog rides with NO rate table (the
 // rateless contract) instead of mixing our rates into its ids.
 let catalogUrl: string | undefined;
-let catalogCache: {
-  at: number;
-  promise: Promise<CatalogModel2 | null>;
-} | null = null;
-const catalogOnce = (): Promise<CatalogModel2 | null> => {
-  if (!catalogCache || Date.now() - catalogCache.at > 60_000) {
-    catalogCache = {
-      at: Date.now(),
-      promise: loadCatalog({ catalogUrl }).catch(() => null),
-    };
-  }
-  return catalogCache.promise;
-};
+
+// Shared TTL memo behind catalogOnce/pricingOnce: one promise per window,
+// failures degrade to null and are retried only after the TTL expires.
+function ttlMemo<T>(load: () => Promise<T>): () => Promise<T | null> {
+  const TTL_MS = 60_000;
+  let cache: { at: number; promise: Promise<T | null> } | null = null;
+  return () => {
+    if (!cache || Date.now() - cache.at > TTL_MS) {
+      cache = { at: Date.now(), promise: load().catch(() => null) };
+    }
+    return cache.promise;
+  };
+}
+
+const catalogOnce = ttlMemo(() => loadCatalog({ catalogUrl }));
 
 // The official-rate table joins the catalog for the /model card; memoized on
 // the same TTL and equally best-effort (no table → the card shows dashes).
-let pricingCache: {
-  at: number;
-  promise: Promise<PricingTable | null>;
-} | null = null;
-const pricingOnce = (): Promise<PricingTable | null> => {
-  if (!pricingCache || Date.now() - pricingCache.at > 60_000) {
-    pricingCache = {
-      at: Date.now(),
-      promise: loadPricing({ catalogUrl }).catch(() => null),
-    };
-  }
-  return pricingCache.promise;
-};
+const pricingOnce = ttlMemo(() => loadPricing({ catalogUrl }));
 
 // The /stats body is the same string at open and on every live re-render:
 // one computation, one model-attribution rule (the header names the LAST
@@ -259,7 +237,7 @@ const showModel = async (api: TuiLike, pricingOn: boolean): Promise<void> => {
           catalogOnce(),
           pricingOnce(),
         ]);
-        const model: CatalogModel2["models"][number] | undefined =
+        const model: Catalog["models"][number] | undefined =
           catalog?.models.find((m) => m.id === modelID);
         if (model) {
           const card: ModelCard = {
@@ -329,8 +307,7 @@ export default {
       catalogUrl = configuredCatalogUrl(api.state?.config, {
         catalogUrl: options?.catalogUrl,
       });
-      const features: { slots: boolean; keymap: boolean } =
-        pickTuiFeatures(api);
+      const features = pickTuiFeatures(api);
       debug("features:", JSON.stringify(features));
       if (!features.slots) {
         debug("slots API missing; stats UI retires silently");

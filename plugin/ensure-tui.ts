@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   applyEdits,
   findNodeAtLocation,
@@ -154,6 +154,11 @@ export const ensureTuiPlugin = async (
     const home = opts.home ?? homedir();
     const { readFile, writeFile, stat, rename } =
       await import("node:fs/promises");
+    const exists = (path: string): Promise<boolean> =>
+      stat(path).then(
+        () => true,
+        () => false,
+      );
 
     const opencodeDir = join(home, ".config", "opencode");
     const globalJson = join(opencodeDir, "tui.json");
@@ -165,21 +170,11 @@ export const ensureTuiPlugin = async (
     const envSpec = env.OPENCODE_TUI_CONFIG;
     if (typeof envSpec === "string" && envSpec.trim() !== "") {
       const envPath = expandTilde(envSpec.trim(), home);
-      target = (await stat(envPath).then(
-        () => true,
-        () => false,
-      ))
-        ? envPath
-        : null;
+      target = (await exists(envPath)) ? envPath : null;
       if (!target) return "skipped-env-missing";
     } else {
       for (const candidate of [globalJson, globalJsonc]) {
-        if (
-          await stat(candidate).then(
-            () => true,
-            () => false,
-          )
-        ) {
+        if (await exists(candidate)) {
           target = candidate;
           break;
         }
@@ -219,6 +214,6 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function mkdirWrite(path: string, content: string): Promise<void> {
   const { mkdir, writeFile } = await import("node:fs/promises");
-  await mkdir(join(path, ".."), { recursive: true });
+  await mkdir(dirname(path), { recursive: true });
   await writeFile(path, content);
 }
