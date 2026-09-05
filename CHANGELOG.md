@@ -5,15 +5,22 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-09-05
+
 ### Added
 
-- Self-update (precedent: `@tarquinen/opencode-dcp`). On every boot the server entry does one npm registry lookup (10 s timeout, fail-silent); if a newer release exists and the plugin runs from npm with an unpinned spec, it deletes the cached wrapper under `~/.cache/opencode/packages/` so opencode reinstalls the latest on the next start, raises a toast ("Updated … Restart opencode to finish.") and writes a small record the TUI renders as an `↑ <version>` badge next to the stats line until the update is consumed. Dev installs and pinned specs are never touched; the check runs regardless of `stats: "off"` (it is plugin infrastructure, not stats).
-- `tui: "ensure"` plugin option (opt-in, default off). The TUI host of opencode ≥ 1.18 only reads its plugin list from `tui.json`, so an npm install left the stats UI dead until a manual edit. With the knob on, the server entry — which always loads — registers the TUI entry itself: it patches the tui.json opencode will actually read (`$OPENCODE_TUI_CONFIG` when set, else the global `~/.config/opencode/tui.json`/`tui.jsonc`), surgically and idempotently (comments preserved, existing entries like `["…", { "stats": "off" }]` untouched, backup + atomic rename), never in dev. Takes effect on the next TUI launch. `jsonc-parser` is a new dependency.
-- Session-id resolution for the stats line no longer depends on the one-shot slot mount: when no session existed at TUI mount (fresh start, not a restored one), the TUI plugin now falls back to `api.route.current` to find the session id, so the live line appears instead of the dashes placeholder forever.
+- The plugin now updates itself, the way `@tarquinen/opencode-dcp` does. On every boot the server entry checks npm once (10 s timeout, a failed check is ignored). When a newer release exists and the plugin came from npm with an unpinned spec, opencode reinstalls the latest on its next start, a toast says "Updated … Restart opencode to finish.", and the stats line shows an `↑ <version>` badge until then. Repo checkouts and pinned specs are never touched. The check runs even with `stats: "off"` because it is plugin infrastructure, not stats.
+- `tui: "ensure"` plugin option (off by default). The TUI host of opencode 1.18+ reads its plugin list only from `tui.json`, so an npm install left the stats line dead until a manual edit. With the option on, the server entry registers the TUI entry itself: it patches the tui.json opencode actually reads (`$OPENCODE_TUI_CONFIG` when set, else the global one), adds the spec only when it is missing, keeps comments and existing entries (like `["…", { "stats": "off" }]`) intact, backs up the file and writes it atomically. Dev installs write nothing. The change lands on the next TUI launch. `jsonc-parser` is a new dependency.
+
+### Fixed
+
+- The stats line no longer stays on the dashes placeholder when the TUI starts with no open session (a fresh start, not a restored one). The slot renders once at mount, so the session id used to stay empty for the whole run; the TUI plugin now falls back to `api.route.current` and picks up the session after it opens.
 
 ### Changed
 
-- Documentation: `opencode plugin @srnoob2570/opencode-ollama-cloud` is now the documented primary install route (it registers both the provider entry and the TUI entry in one command); the manual `tui.json` edit and the new `tui: "ensure"` option are the alternatives.
+- Documentation: `opencode plugin @srnoob2570/opencode-ollama-cloud` is the primary install route (it registers the provider and TUI entries in one command). Manual `tui.json` edits and the new `tui: "ensure"` option are the alternatives.
+
+**Full changelog:** https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.8...v0.1.9
 
 ## [0.1.8] - 2026-09-03
 
@@ -147,7 +154,9 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 - README in English and Spanish.
 - CI refreshes the catalog on a schedule and verifies the catalog before publishing.
 
-[Unreleased]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.8...v0.1.9
+[0.1.8]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.4...v0.1.5
