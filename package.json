@@ -1,6 +1,6 @@
 {
   "name": "@srnoob2570/opencode-ollama-cloud",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "opencode plugin: live Ollama Cloud model catalog, served from srnoob2570/ollama-cloud-catalog",
   "type": "module",
   "license": "MIT",

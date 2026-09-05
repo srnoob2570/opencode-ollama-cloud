@@ -3,11 +3,17 @@
 Entries here follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [SemVer](https://semver.org/spec/v2.0.0.html).
 Each version also lives on the [releases page](https://github.com/srnoob2570/opencode-ollama-cloud/releases).
 
-## [Unreleased]
+## [0.1.10] - 2026-09-05
 
 ### Changed
 
+- The catalog is no longer built in this repo. The plugin consumes a single `catalog.json` from [srnoob2570/ollama-cloud-catalog](https://github.com/srnoob2570/ollama-cloud-catalog), where GitHub Actions build it behind a hash gate: a change in Ollama's `/v1/models` list triggers a full re-extraction, specs come from `/api/show` and a model parses the rate card. A failed scrape aborts upstream instead of publishing a degraded catalog. The local `scripts/`, the schemas and the pricing workflows are gone.
+- Pricing ships embedded in each model's `cost` block instead of a separate `catalog/pricing.json`. The plugin keeps showing the standard off-peak rate; peak windows live in the artifact's `x_ollama` extension. The cost counter behaves the same as before.
+- The model card always labels quantization as "(declared)". The value comes from Ollama's `/api/show` through the upstream pipeline, so the old "(implicit)" source distinction no longer exists.
+- `catalogUrl` no longer means "catalog without rates". A custom URL is tried first; when it fails or serves an invalid document, the official mirrors stay as fallback.
 - Documentation: the READMEs claimed the stats line renders "next to the token counter". It does not, and never did: the line renders on the right side of the prompt row (the row with the model name), one row above opencode's own context/cost counter, which is a separate sidebar line the plugin does not touch. The example line now shows only what the plugin renders (`38.2 tok/s · TTFT 380 ms · Session average`).
+
+**Full changelog:** https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.9...v0.1.10
 
 ## [0.1.9] - 2026-09-05
 
