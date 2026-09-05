@@ -57,12 +57,12 @@ ollama-cloud/qwen3.5:397b
 
 ## Cómo funciona
 
-```
-ollama.com/v1/models ──┐
-                       ├─→ GitHub Action (cada 15 min) ─→ catalog/catalog.json (auto-commit)
-ollama.com/library/* ──┘
-
-catalog.json (jsDelivr, purgado tras cada commit / raw.githubusercontent / cache local) ─→ plugin ─→ opencode
+```mermaid
+flowchart LR
+  A["ollama.com<br>/v1/models · /library/*"] --> B["update-catalog.ts<br>GitHub Action · 15 min"]
+  B --> C["catalog/catalog.json<br>jsDelivr · raw · auto-commit"]
+  C --> D["opencode-ollama-cloud<br>fallback: cache · models.dev"]
+  D --> E["opencode"]
 ```
 
 **Action** (`.github/workflows/update.yml`): corre `bun scripts/update-catalog.ts update` con cron cada 15 minutos. Barato por diseño. El check es 1 GET a `/v1/models`; el scraping solo ocurre si la lista cambió (o una vez por semana, para refrescar los datos de enriquecimiento). El catálogo actualizado se valida (`bun scripts/validate-catalog.ts`) antes de commitear. Peor caso de staleness ≈ 15 min + propagación CDN.
