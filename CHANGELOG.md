@@ -5,6 +5,10 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 
 ## [Unreleased]
 
+### Changed
+
+- Documentation: the READMEs claimed the stats line renders "next to the token counter". It does not, and never did: the line renders on the right side of the prompt row (the row with the model name), one row above opencode's own context/cost counter, which is a separate sidebar line the plugin does not touch. The example line now shows only what the plugin renders (`38.2 tok/s · TTFT 380 ms · Session average`).
+
 ## [0.1.9] - 2026-09-05
 
 ### Added

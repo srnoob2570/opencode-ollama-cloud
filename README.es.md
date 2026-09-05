@@ -19,7 +19,7 @@ models.dev (la fuente de modelos de opencode) se actualiza manualmente por PR y 
 opencode plugin @srnoob2570/opencode-ollama-cloud --force --global
 ```
 
-`--force` reemplaza una versión ya instalada — opencode no tiene comando de actualización de plugins, así que repetir este comando es la forma de actualizar. `--global` instala en `~/.config/opencode/opencode.json` en vez de en la config del proyecto.
+`--force` reemplaza una versión ya instalada. opencode no tiene comando de actualización de plugins, así que repetir este comando es la forma de actualizar. `--global` instala en `~/.config/opencode/opencode.json` en vez de en la config del proyecto.
 
 Eso es todo. Reinicia opencode y verifica:
 
@@ -28,6 +28,30 @@ opencode models ollama-cloud --refresh
 ```
 
 Deberías ver la lista live completa (ej. `ollama-cloud/glm-5.3-flash`), incluyendo modelos que models.dev aún no tiene.
+
+```bash
+srnoob@MS-7A38:~$ opencode models ollama-cloud --refresh
+Models cache refreshed
+ollama-cloud/deepseek-v4-flash:0731
+ollama-cloud/deepseek-v4-pro:0813
+ollama-cloud/gemma4:31b
+ollama-cloud/glm-5.1
+ollama-cloud/glm-5.2
+ollama-cloud/glm-5.3
+ollama-cloud/glm-5.3-flash
+ollama-cloud/gpt-oss:120b
+ollama-cloud/gpt-oss:20b
+ollama-cloud/kimi-k2.6
+ollama-cloud/kimi-k2.7-code
+ollama-cloud/kimi-k3
+ollama-cloud/minimax-m2.7
+ollama-cloud/minimax-m3
+ollama-cloud/mistral-large-3:675b
+ollama-cloud/nemotron-3-nano:30b
+ollama-cloud/nemotron-3-super
+ollama-cloud/nemotron-3-ultra
+ollama-cloud/qwen3.5:397b
+```
 
 > Asume que ya configuraste tu API key de ollama.com (`opencode auth login` → `ollama-cloud`). Si el proveedor ya estaba registrado, el plugin solo refresca su lista de modelos.
 
@@ -41,7 +65,7 @@ ollama.com/library/* ──┘
 catalog.json (jsDelivr, purgado tras cada commit / raw.githubusercontent / cache local) ─→ plugin ─→ opencode
 ```
 
-**Action** (`.github/workflows/update.yml`): corre `bun scripts/update-catalog.ts update` con cron cada 15 minutos. Barato por diseño — el check es 1 GET a `/v1/models`; el scraping solo ocurre si la lista cambió (o una vez por semana, para refrescar los datos de enriquecimiento). El catálogo actualizado se valida (`bun scripts/validate-catalog.ts`) antes de commitear. Peor caso de staleness ≈ 15 min + propagación CDN.
+**Action** (`.github/workflows/update.yml`): corre `bun scripts/update-catalog.ts update` con cron cada 15 minutos. Barato por diseño. El check es 1 GET a `/v1/models`; el scraping solo ocurre si la lista cambió (o una vez por semana, para refrescar los datos de enriquecimiento). El catálogo actualizado se valida (`bun scripts/validate-catalog.ts`) antes de commitear. Peor caso de staleness ≈ 15 min + propagación CDN.
 
 - `check`: compara el hash de `{id, created}` de `/v1/models` contra el catálogo commiteado. Sin scraping.
 - `update`: si el hash cambió (o el catálogo tiene más de 7 días), scrapea `ollama.com/library/<base>` (1 request por familia, ~15 requests), enriquece con datos sembrados de models.dev (max output tokens, fechas de release) y escribe `catalog/catalog.json`. Si no cambió, no toca nada. Si un scrape falla y no hay datos previos que conservar, el update aborta en vez de publicar un catálogo degradado.
@@ -87,8 +111,8 @@ catalog.json (jsDelivr, purgado tras cada commit / raw.githubusercontent / cache
 
 - `catalogUrl`: URL alternativa del catálogo (se intenta primero).
 - `timeoutMs`: timeout de cada fetch (default `5000`).
-- `pricing`: `"on"` (default) o `"off"` — si el contador de costos de opencode muestra la tarifa oficial de Ollama Cloud. `pricing: "reference"` (el valor viejo opt-in) sigue funcionando y significa `"on"`.
-- `tui`: `"ensure"` (opt-in, default off) — la entrada server registra ella misma la entrada TUI parcheando el tui.json que opencode va a leer (`$OPENCODE_TUI_CONFIG` si está seteado, si no el global). Idempotente y preserva comentarios; surte efecto en el próximo arranque de la TUI. Instalaciones dev (rutas del repo) jamás parchean nada.
+- `pricing`: `"on"` (default) o `"off"`. Controla si el contador de costos de opencode muestra la tarifa oficial de Ollama Cloud. `pricing: "reference"` (el valor viejo opt-in) sigue funcionando y significa `"on"`.
+- `tui`: `"ensure"` (opt-in, default off). La entrada server registra ella misma la entrada TUI parcheando el tui.json que opencode va a leer (`$OPENCODE_TUI_CONFIG` si está seteado, si no el global). Idempotente, preserva comentarios, surte efecto en el próximo arranque de la TUI. Instalaciones dev (rutas del repo) jamás parchean nada.
 
 ```json
 {
@@ -96,47 +120,56 @@ catalog.json (jsDelivr, purgado tras cada commit / raw.githubusercontent / cache
 }
 ```
 
-El catálogo trae la **tarifa oficial de Ollama Cloud** por modelo — precios de input, cached input y output en USD por 1M de tokens, directamente de la [rate card](https://ollama.com/pricing) pública de Ollama en `catalog/pricing.json`. Es lo que tus créditos pagan de verdad por token, así que el contador de costos de opencode la muestra por defecto (opt-out: `pricing: "off"` la apaga). Los modelos sin tarifa quedan en $0 (sin estimaciones a medias).
+El catálogo trae la tarifa oficial de Ollama Cloud por modelo: precios de input, cached input y output en USD por 1M de tokens, tomados de la [rate card](https://ollama.com/pricing) pública de Ollama en `catalog/pricing.json`. Es lo que tus créditos pagan de verdad por token, así que el contador de costos de opencode la muestra por defecto (`pricing: "off"` la apaga). Los modelos sin tarifa quedan en $0.
 
-Actualizar la tabla es un **workflow manual de GitHub Actions** (`.github/workflows/update-pricing.yml`): disparás `update-pricing` desde la pestaña Actions (o `gh workflow run update-pricing`) y fetcha la rate card viva, imprime un diff tarifa-por-tarifa en el log del run, reescribe `catalog/pricing.json` y commitea el cambio, purgando la caché de jsDelivr para que los usuarios reciban las tarifas nuevas. Si la página y el catálogo no cuadran (un modelo nuevo o retirado), aborta con un reporte y no escribe nada. No hay ningún schedule — las tarifas cambian solo cuando vos disparás el run. El mismo script funciona desde tu máquina (`bun run update-pricing`); el update automático del catálogo jamás toca el pricing de ninguna de las dos formas.
+Actualizar la tabla es un workflow manual de GitHub Actions (`.github/workflows/update-pricing.yml`). Disparás `update-pricing` desde la pestaña Actions (o `gh workflow run update-pricing`) y fetcha la rate card viva, imprime un diff tarifa-por-tarifa en el log del run, reescribe `catalog/pricing.json` y commitea el cambio, purgando la caché de jsDelivr para que los usuarios reciban las tarifas nuevas. Si la página y el catálogo no cuadran (un modelo nuevo o retirado), aborta con un reporte y no escribe nada. No hay ningún schedule; las tarifas cambian solo cuando vos disparás el run. El mismo script funciona desde tu máquina (`bun run update-pricing`), y el update automático del catálogo jamás toca el pricing.
 
 ## Estadísticas de streaming y ficha de modelo
 
-El plugin mide lo que opencode no guarda: **TTFT** (tiempo hasta el primer
-token) y **tokens/s** de cada LLM step, del lado del cliente — con precisión de
-wire en `ollama-cloud` (el plugin envuelve el `fetch` del provider y lee el
-chunk final de `usage` que opencode ya pide) y por eventos para cualquier otro
-proveedor. Muestra el **promedio de la sesión** — las métricas son de la
-sesión, no del modelo activo (sin desglose por modelo ni reset al cambiar), —
-junto al contador de tokens:
+El plugin mide lo que opencode no guarda: TTFT (tiempo hasta el primer
+token) y tokens/s de cada LLM step, del lado del cliente. En `ollama-cloud`
+los números tienen precisión de wire porque el plugin envuelve el `fetch` del
+provider y lee el chunk final de `usage` que opencode ya pide; para cualquier
+otro proveedor los deriva de los eventos de opencode. Muestra el promedio de
+la sesión en el lado derecho de la fila del prompt (la fila del nombre del
+modelo), una fila arriba de la línea de contexto/costo de opencode. Las
+métricas son de la sesión, no del modelo activo: sin desglose por modelo ni
+reset al cambiar.
 
-```
-12.4k tokens (23%) · $0.02 · 38.2 tok/s · TTFT 380 ms · Session average
-```
+![Línea de stats viva en la fila del prompt](docs/img/stats.png)
 
-- `/stats` — resumen de sesión y últimas respuestas (detalle por step; las
+La línea de la derecha es del plugin: `197.0 tok/s · TTFT 1298 ms · Session
+average`. El conteo de tokens y el costo que se ven debajo (`26.0K (2%) ·
+$0.01`) son el contador propio de opencode, una línea aparte que el plugin no
+toca.
+
+- `/stats`. Resumen de sesión y últimas respuestas (detalle por step; las
   filas `wire` y `event` son distinguibles).
-- `/model` — ficha del modelo activo: cuantización, familia, capacidades,
+
+![El diálogo /stats con el promedio de sesión y las respuestas recientes](docs/img/stats_command.png)
+
+- `/model`. Ficha del modelo activo: cuantización, familia, capacidades,
   límites, release y la tarifa oficial (input · cached input · output por 1M;
   salvo `pricing: "off"`).
 
-El promedio solo cuenta el **chat principal**: subagentes, titlegen y
-compaction jamás entran (señales verificadas contra el código de opencode).
-Los números viven en memoria por sesión — no se persiste nada ni sale nada de
-tu máquina. La UI de stats es una segunda entrada de plugin y degrada en
-silencio: en un opencode donde la API TUI cambió, provider/catálogo siguen
+![El diálogo /model con la ficha del modelo: cuantización y tarifa oficial](docs/img/model_command.png)
+
+El promedio solo cuenta el chat principal. Subagentes, titlegen y compaction
+jamás entran (señales verificadas contra el código de opencode). Los números
+viven en memoria por sesión; no se persiste nada ni sale nada de tu máquina.
+La UI de stats es una segunda entrada de plugin y degrada en silencio. En un
+build de opencode donde la API TUI cambió, provider/catálogo siguen
 funcionando y las stats simplemente desaparecen (probado contra opencode
-**1.18.27**; la API que usa existe pero no está documentada — stats UI es
-best-effort hasta que upstream la documente).
+1.18.27; la API que usa existe pero no está documentada, así que la UI de
+stats es best-effort hasta que upstream la documente).
 
 La entrada del provider vive en el array `plugin` de `opencode.json`, como
-siempre. **La entrada de la TUI va en `tui.json`**: desde opencode 1.18, el
-host TUI solo carga sus plugins desde `~/.config/opencode/tui.json` (o el del
-proyecto) — el array `plugin` de `opencode.json` se ignora en el lado TUI.
+siempre. La entrada de la TUI va en `tui.json`. Desde opencode 1.18, el host
+TUI solo carga sus plugins desde `~/.config/opencode/tui.json` (o el del
+proyecto); el array `plugin` de `opencode.json` se ignora en el lado TUI.
 
-**Ruta primaria (recomendada para installs por npm)**: el comando del CLI
-registra ambas entradas de una vez (lee el `main` y `exports["./tui"]` del
-paquete y parchea ambas configs):
+Para installs por npm, el comando del CLI registra ambas entradas de una vez
+(lee el `main` y `exports["./tui"]` del paquete y parchea ambas configs):
 
 ```bash
 opencode plugin @srnoob2570/opencode-ollama-cloud
@@ -165,33 +198,33 @@ instalado):
 }
 ```
 
-- `stats`: `"on"` (default) o `"off"` — ponlo en **ambas entradas** (forma de
+- `stats`: `"on"` (default) o `"off"`. Ponlo en ambas entradas (forma de
   tupla, p. ej. `["…", { "stats": "off" }]`) y todo se apaga: sin medición,
   sin UI, exactamente el plugin de siempre.
 
 ### Auto-actualización
 
-En cada arranque la entrada server hace un lookup al registry de npm y, si hay
+En cada arranque la entrada server hace un lookup al registry de npm. Si hay
 release más nueva y el plugin vino instalado por npm con un spec sin fijar,
-deja la actualización preparada igual que `@tarquinen/opencode-dcp`: borra el
+deja la actualización preparada igual que `@tarquinen/opencode-dcp`. Borra el
 wrapper cacheado bajo `~/.cache/opencode/packages/` para que opencode
 reinstale la última al siguiente inicio, muestra un toast ("Updated … Restart
-opencode to finish.") y la TUI muestra un badge `↑ <versión>` junto a la línea
+opencode to finish.") y la TUI muestra un badge `↑ <versión>` sobre la línea
 de stats hasta consumir el update. Installs dev (repo) y specs fijados
-(`…@0.1.8`) jamás se tocan, y un lookup fallido se ignora en silencio (timeout
-de 10 s, fail-silent).
+(`…@0.1.8`) jamás se tocan. Un lookup fallido se ignora (timeout de 10 s,
+fail-silent).
 
 ### Cuantización: declarada, no garantizada
 
-La **cuantización** de la ficha es el valor que Ollama **declara** para el
-modelo que sirve (`file_type` del registry, contrastado con `/api/show`),
-investigado por modelo y transportado en el catálogo — **no** garantiza la
-precisión a la que corre realmente la inferencia remota. Los modelos sin
-fuente pública defendible muestran `unknown` (nunca se inventan), y los
-modelos fuera del catálogo muestran `—`.
+La cuantización de la ficha es el valor que Ollama declara para el modelo que
+sirve (`file_type` del registry, contrastado con `/api/show`), investigado por
+modelo y transportado en el catálogo. No garantiza la precisión a la que corre
+realmente la inferencia remota. Los modelos sin fuente pública defendible
+muestran `unknown` (nunca se inventan); los modelos fuera del catálogo
+muestran `—`.
 
-Crédito del origen de la idea: el usuario de GitHub
-**[@adilfaisal01](https://github.com/adilfaisal01)**.
+La idea de las stats de streaming la propuso el usuario de GitHub
+[@adilfaisal01](https://github.com/adilfaisal01).
 
 ## Desarrollo
 
