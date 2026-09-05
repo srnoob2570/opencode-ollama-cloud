@@ -1,217 +1,235 @@
 import { describe, expect, test } from "bun:test";
-import {
-  catalogModel,
-  catalogWith,
-  pricingRate,
-} from "../scripts/test-fixtures.ts";
-import {
-  isCatalog,
-  isPricingTable,
-  pricingCoverageProblems,
-  type PricingRate,
-} from "./catalog.ts";
+import { isCatalog, toCatalogModel, type ArtifactModel } from "./catalog.ts";
+
+// Fixture mirrors the live artifact shape (models.dev shape + x_ollama),
+// published by srnoob2570/ollama-cloud-catalog.
+const entry = (
+  id: string,
+  overrides: Partial<ArtifactModel> = {},
+): ArtifactModel => ({
+  id,
+  name: "GLM 5.3",
+  attachment: false,
+  reasoning: true,
+  tool_call: true,
+  limit: { context: 1024 * 1024, output: 131072 },
+  modalities: { input: ["text"] },
+  release_date: "2026-08-14",
+  x_ollama: { quantization: "FP8", reasoning_options: ["low", "high"] },
+  ...overrides,
+});
+
+const docWith = (models: ArtifactModel[]) => ({
+  provider: {
+    id: "ollama-cloud",
+    name: "Ollama Cloud",
+    npm: "@ai-sdk/openai-compatible",
+    doc: "https://ollama.com/docs/cloud",
+    env: ["OLLAMA_API_KEY"],
+    models: Object.fromEntries(models.map((m) => [m.id, m])),
+  },
+  x_ollama: {
+    generated_at: "2026-09-05T11:54:37.396Z",
+    models_hash:
+      "e06ea128b326f65bf969a63418eba2277f53ca5e4b266ee92d049054d45609a4",
+  },
+});
 
 describe("isCatalog", () => {
-  const validModel = catalogModel("gpt-oss:120b", {
-    name: "GPT OSS (120b)",
-    created: 1754402400,
-    capabilities: { tools: true, thinking: true, vision: false },
-    context: 131072,
-    maxOutput: 131072,
-    releaseDate: "2026-08-05",
-  });
-  const validCatalog = catalogWith([validModel]);
+  const validModel = entry("glm-5.3");
+  const validDoc = docWith([validModel]);
 
-  test("accepts a well-formed catalog", () => {
-    expect(isCatalog(validCatalog)).toBe(true);
+  test("accepts a well-formed artifact", () => {
+    expect(isCatalog(validDoc)).toBe(true);
   });
 
-  test("rejects context 0 (scrape-regression guard)", () => {
-    const bad = { ...validCatalog, models: [{ ...validModel, context: 0 }] };
+  test("rejects context 0 (regression guard)", () => {
+    const bad = docWith([{ ...validModel, limit: { context: 0, output: 1 } }]);
     expect(isCatalog(bad)).toBe(false);
   });
 
-  test("rejects missing releaseDate (consumed as a required string downstream)", () => {
+  test("rejects missing release_date (consumed as a required string downstream)", () => {
     const noDate: Record<string, unknown> = { ...validModel };
-    delete noDate.releaseDate;
-    expect(isCatalog({ ...validCatalog, models: [noDate] })).toBe(false);
+    delete noDate.release_date;
+    expect(isCatalog(docWith([noDate as unknown as ArtifactModel]))).toBe(
+      false,
+    );
   });
 
-  test("rejects missing family and non-array reasoningOptions", () => {
-    const noFamily: Record<string, unknown> = { ...validModel };
-    delete noFamily.family;
-    expect(isCatalog({ ...validCatalog, models: [noFamily] })).toBe(false);
-    const badReasoning = { ...validModel, reasoningOptions: undefined };
-    expect(isCatalog({ ...validCatalog, models: [badReasoning] })).toBe(false);
+  test("rejects missing name and non-boolean flags", () => {
+    const noName: Record<string, unknown> = { ...validModel };
+    delete noName.name;
+    expect(isCatalog(docWith([noName as unknown as ArtifactModel]))).toBe(
+      false,
+    );
+    expect(
+      isCatalog(
+        docWith([{ ...validModel, reasoning: 1 } as unknown as ArtifactModel]),
+      ),
+    ).toBe(false);
   });
 
   test("rejects non-objects and shapeless models", () => {
     expect(isCatalog(null)).toBe(false);
     expect(isCatalog("null")).toBe(false);
-    expect(isCatalog({ ...validCatalog, models: [{ id: 42 }] })).toBe(false);
+    expect(
+      isCatalog({
+        ...validDoc,
+        provider: { ...validDoc.provider, models: { x: { id: 42 } } },
+      }),
+    ).toBe(false);
+  });
+
+  test("rejects a broken models_hash gate fingerprint", () => {
+    for (const hash of [
+      undefined,
+      "",
+      "deadbeef",
+      "E06EA128".padEnd(64, "0"),
+    ]) {
+      const doc = docWith([validModel]);
+      (doc.x_ollama as Record<string, unknown>).models_hash = hash;
+      expect(isCatalog(doc)).toBe(false);
+    }
+  });
+
+  test("rejects a provider block missing npm/doc or with a non-array env", () => {
+    for (const key of ["npm", "doc"] as const) {
+      const doc = docWith([validModel]);
+      delete (doc.provider as Record<string, unknown>)[key];
+      expect(isCatalog(doc)).toBe(false);
+    }
+    const doc = docWith([validModel]);
+    (doc.provider as Record<string, unknown>).env = "OLLAMA_API_KEY";
+    expect(isCatalog(doc)).toBe(false);
   });
 });
 
-// Pricing is NOT part of the catalog contract anymore: the official rate
-// card (catalog/pricing.json) is its own contract side (isPricingTable). A
-// foreign or old catalog carrying embedded pricing still loads — the extra
-// field is ignored, the plugin only joins the table.
-describe("isCatalog pricing is not the catalog's business", () => {
-  const validModel = catalogModel("glm-5.3-flash", {
-    name: "GLM 5.3 Flash",
-    created: 1787929200,
-    family: "glm",
-    capabilities: { tools: true, thinking: true, vision: false },
-    context: 1024 * 1024,
-    maxOutput: 131072,
-  });
-
-  test("old catalogs with embedded pricing still load (extra field ignored)", () => {
-    expect(
-      isCatalog(
-        catalogWith([
-          { ...validModel, pricing: { input: 0.075, output: 0.25 } },
-        ]),
-      ),
-    ).toBe(true);
-  });
-
-  test("a catalog with garbage embedded pricing still loads (never consulted)", () => {
-    expect(
-      isCatalog(
-        catalogWith([{ ...validModel, pricing: { input: "x", output: -1 } }]),
-      ),
-    ).toBe(true);
-  });
-});
-
-// Optional quantization: absent (old catalogs) always loads; a present one is
-// shape-only — raw values and "unknown" pass, no enum, so a new Ollama format
-// can never break the loader (the updater's policy: CI advises, never fails).
+// Optional quantization: absent always loads; a present one is shape-only —
+// raw values and "unknown" pass, no enum, so a new Ollama format can never
+// break the loader (the updater's policy: CI advises, never fails).
 describe("isCatalog optional quantization", () => {
-  const validModel = catalogModel("glm-5.3", {
-    context: 1024 * 1024,
-    maxOutput: 131072,
-  });
+  const validModel = entry("glm-5.3");
 
-  test("absent field loads (old catalogs unchanged)", () => {
-    expect(isCatalog(catalogWith([validModel]))).toBe(true);
+  test("absent field loads", () => {
+    expect(isCatalog(docWith([{ ...validModel, x_ollama: {} }]))).toBe(true);
   });
 
   test("raw values and the unknown literal load", () => {
     for (const value of ["FP8", "MXFP4", "unknown", "Some-New-Format-2049"])
       expect(
-        isCatalog(catalogWith([{ ...validModel, quantization: value }])),
+        isCatalog(
+          docWith([{ ...validModel, x_ollama: { quantization: value } }]),
+        ),
       ).toBe(true);
   });
 
   test("garbage is rejected (empty string, numbers)", () => {
-    expect(isCatalog(catalogWith([{ ...validModel, quantization: "" }]))).toBe(
-      false,
-    );
+    expect(
+      isCatalog(docWith([{ ...validModel, x_ollama: { quantization: "" } }])),
+    ).toBe(false);
     expect(
       isCatalog(
-        catalogWith([{ ...validModel, quantization: 8 as unknown as string }]),
+        docWith([
+          {
+            ...validModel,
+            x_ollama: { quantization: 8 as unknown as string },
+          },
+        ]),
       ),
     ).toBe(false);
   });
 });
 
-// The pricing table (catalog/pricing.json) is its own contract side: the
-// plugin joins it by model id, so a malformed entry must never reach the
-// cost counter (same policy as isCatalog: loader checks shape, schema is
-// the published stricter contract).
-describe("isPricingTable", () => {
-  test("accepts a well-formed table", () => {
-    expect(isPricingTable({ "kimi-k3": pricingRate() })).toBe(true);
+// The official rate now rides INSIDE the artifact (each entry's cost block):
+// the loader checks positive-finite invariants on what it consumes so a
+// malformed entry never reaches the cost counter.
+describe("isCatalog embedded cost", () => {
+  const validModel = entry("glm-5.3-flash", {
+    cost: { input: 0.03, output: 0.1, cache_read: 0.007 },
   });
 
-  test("accepts the $schema pointer (metadata, not an entry)", () => {
-    expect(
-      isPricingTable({
-        $schema: "./pricing.schema.json",
-        "kimi-k3": pricingRate(),
-      }),
-    ).toBe(true);
+  test("absent cost loads (third-party/custom catalogs stay valid)", () => {
+    expect(isCatalog(docWith([{ ...validModel, cost: undefined }]))).toBe(true);
   });
 
-  test("rejects non-objects and arrays", () => {
-    expect(isPricingTable(null)).toBe(false);
-    expect(isPricingTable("table")).toBe(false);
-    expect(isPricingTable([pricingRate()])).toBe(false);
-  });
-
-  test("rejects zero, negative, NaN and Infinity rates", () => {
+  test("zero, negative, NaN and Infinity rates are rejected", () => {
     for (const over of [
-      { input: 0 },
-      { input: -1 },
-      { output: Number.NaN },
-      { output: 1e999 },
+      { input: 0, output: 1 },
+      { input: -1, output: 1 },
+      { input: Number.NaN, output: 1 },
+      { input: 1, output: 1e999 },
     ]) {
-      expect(isPricingTable({ "kimi-k3": pricingRate(over) })).toBe(false);
+      expect(isCatalog(docWith([{ ...validModel, cost: over }]))).toBe(false);
     }
   });
 
-  test("rejects a wrong unit and non-string meta", () => {
+  test("cache_read is optional but must be positive-finite", () => {
     expect(
-      isPricingTable({
-        "kimi-k3": pricingRate({
-          unit: "per-token",
-        } as unknown as Partial<PricingRate>),
-      }),
-    ).toBe(false);
+      isCatalog(docWith([{ ...validModel, cost: { input: 1, output: 1 } }])),
+    ).toBe(true);
     expect(
-      isPricingTable({
-        "kimi-k3": pricingRate({ asOf: 42 } as unknown as Partial<PricingRate>),
-      }),
+      isCatalog(
+        docWith([
+          { ...validModel, cost: { input: 1, output: 1, cache_read: -0.01 } },
+        ]),
+      ),
     ).toBe(false);
-  });
-
-  test("cachedInput is optional but must be finite and positive (schema parity)", () => {
-    const { cachedInput: _drop, ...noCache } = pricingRate();
-    expect(isPricingTable({ "kimi-k3": noCache })).toBe(true);
-    expect(
-      isPricingTable({ "kimi-k3": pricingRate({ cachedInput: -0.01 }) }),
-    ).toBe(false);
-    expect(isPricingTable({ "kimi-k3": pricingRate({ cachedInput: 0 }) })).toBe(
-      false,
-    );
   });
 });
 
-// The coverage cross-check lives here (next to the contract it enforces) and
-// is shared by CI's validator and the manual update-pricing workflow — one
-// implementation, so the two can never drift apart (code-review finding).
-describe("pricingCoverageProblems (cobertura tabla ↔ catálogo)", () => {
-  test("tabla completa y sin huérfanos → vacío", () => {
-    const { orphanRates, missingRates } = pricingCoverageProblems(
-      { "kimi-k3": pricingRate() },
-      ["kimi-k3", "glm-5.3-flash"],
-    );
-    expect(orphanRates).toEqual([]);
-    expect(missingRates).toEqual([
-      'catalog model "glm-5.3-flash" has no rate on the pricing page (run bun run update-pricing)',
-    ]);
+// The normalization seam: artifact entry → the plugin's internal view.
+describe("toCatalogModel", () => {
+  test("family is the id base (familia[:tag], CONTEXT.md vocabulary)", () => {
+    expect(toCatalogModel(entry("gpt-oss:120b")).family).toBe("gpt-oss");
+    expect(toCatalogModel(entry("glm-5.3")).family).toBe("glm-5.3");
   });
 
-  test("tarifa huérfana y modelo sin tarifa se reportan por separado", () => {
-    const { orphanRates, missingRates } = pricingCoverageProblems(
-      { "kimi-k99": pricingRate() },
-      ["kimi-k3"],
-    );
-    expect(orphanRates).toHaveLength(1);
-    expect(orphanRates[0]).toContain("kimi-k99");
-    expect(missingRates).toHaveLength(1);
-    expect(missingRates[0]).toContain("kimi-k3");
+  test("capabilities map from reasoning/tool_call/attachment+image modality", () => {
+    expect(toCatalogModel(entry("glm-5.3")).capabilities).toEqual({
+      tools: true,
+      thinking: true,
+      vision: false,
+    });
+    expect(
+      toCatalogModel(entry("gemma4:31b", { attachment: true })).capabilities
+        .vision,
+    ).toBe(true);
+    expect(
+      toCatalogModel(
+        entry("gemma4:31b", {
+          attachment: false,
+          modalities: { input: ["text", "image"] },
+        }),
+      ).capabilities.vision,
+    ).toBe(true);
   });
 
-  test("el puntero $schema nunca es una tarifa huérfana", () => {
-    const table = JSON.parse(
-      JSON.stringify({
-        $schema: "./pricing.schema.json",
-        "kimi-k3": pricingRate(),
+  test("reasoning_options filter non-strings (isCatalog checks the array shape only)", () => {
+    const dirty = entry("glm-5.3", {
+      x_ollama: { reasoning_options: ["low", 42, null, "high"] },
+    });
+    expect(toCatalogModel(dirty).reasoningOptions).toEqual(["low", "high"]);
+  });
+
+  test("cost maps cache_read → cachedInput; absent cost stays absent", () => {
+    const withCost = toCatalogModel(
+      entry("deepseek-v4-flash:0731", {
+        cost: { input: 0.22, output: 0.66, cache_read: 0.007 },
       }),
-    ) as Parameters<typeof pricingCoverageProblems>[0];
-    expect(pricingCoverageProblems(table, ["kimi-k3"]).orphanRates).toEqual([]);
+    );
+    expect(withCost.cost).toEqual({
+      input: 0.22,
+      output: 0.66,
+      cachedInput: 0.007,
+    });
+    expect(toCatalogModel(entry("glm-5.3")).cost).toBeUndefined();
+  });
+
+  test("quantization passes through raw (declared by Ollama)", () => {
+    expect(toCatalogModel(entry("glm-5.3")).quantization).toBe("FP8");
+    expect(
+      toCatalogModel(entry("gemma4:31b", { x_ollama: {} })).quantization,
+    ).toBeUndefined();
   });
 });

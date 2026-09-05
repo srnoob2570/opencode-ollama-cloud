@@ -326,7 +326,10 @@ describe("pricingActive (opt-out: on por defecto, solo `off` apaga)", () => {
     expect(pricingActive(config, {})).toBe(true);
   });
 });
-describe("ficha /model — cuantización implícita no es «declarada» (code review)", () => {
+// La procedencia implícita ya no existe: la cuantización del artifact SIEMPRE
+// viene declarada por Ollama (/api/show quantization_level) — un solo camino
+// de renderizado, sin ramas de fuente.
+describe("ficha /model — cuantización siempre declarada", () => {
   const base = {
     id: "glm-5.2",
     name: "GLM 5.2",
@@ -338,25 +341,11 @@ describe("ficha /model — cuantización implícita no es «declarada» (code re
     capabilities: { tools: true, thinking: false, vision: false },
   };
 
-  test("source implícita → etiqueta (implícita) y footer sin atribuir a Ollama", () => {
-    const card = formatModelCard(
-      {
-        ...base,
-        quantizationSource:
-          "implicit-hf (zai-org/GLM-5.2-FP8 checkpoint + familia glm FP8)",
-      },
-      false,
-    );
-    expect(card).toContain("FP8 (implicit)");
-    expect(card).toContain("quantization researched from public sources");
-    expect(card).not.toContain("(declared)");
-  });
-
-  test("source registry mantiene «(declarada)»", () => {
-    const card = formatModelCard(
-      { ...base, quantizationSource: "registry-ollama" },
-      false,
-    );
+  test("cada cuantización presente se rotula «(declared)» y atribuye a Ollama", () => {
+    const card = formatModelCard(base, false);
     expect(card).toContain("FP8 (declared)");
+    expect(card).toContain("quantization declared by Ollama. Does not");
+    expect(card).not.toContain("(implicit)");
+    expect(card).not.toContain("researched from public sources");
   });
 });

@@ -2,8 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { catalogModel } from "../scripts/test-fixtures.ts";
-import type { CatalogModel } from "./catalog.ts";
+import type { CatalogModel, PricingRate } from "./catalog.ts";
 // Helpers live outside the entry module: opencode's legacy plugin loader
 // calls EVERY exported function of ./index.ts as a plugin factory with
 // (PluginInput, options), so that module must export only the default
@@ -12,17 +11,20 @@ import { createStatsDebugSink, statsDebugSinkFor } from "./debug-sink.ts";
 import { toModelV2 } from "./models.ts";
 import opencodeOllamaCloud from "./index.ts";
 
-// Fixture mirrors the live glm-5.3 catalog entry (2026-08): glm-5.3 advertises
-// thinking tiers, glm-5.1 thinking has no effort levels (toggle only).
-const GLM53: CatalogModel = catalogModel("glm-5.3", {
+// Fixture mirrors the live glm-5.3 catalog entry (2026-08), normalized by
+// the loader: glm-5.3 advertises thinking tiers, glm-5.1 thinking has no
+// effort levels (toggle only).
+const GLM53: CatalogModel = {
+  id: "glm-5.3",
   name: "GLM 5.3",
-  created: 1787929200,
+  family: "glm-5.3",
   capabilities: { tools: true, thinking: true, vision: false },
-  context: 1048576,
+  input: ["text"],
+  context: 1024 * 1024,
   maxOutput: 131072,
   reasoningOptions: ["low", "high", "max"],
   releaseDate: "2026-08-14",
-});
+};
 
 const GLM51: CatalogModel = { ...GLM53, id: "glm-5.1", reasoningOptions: [] };
 
@@ -39,17 +41,6 @@ describe("toModelV2 variants", () => {
 
   test("thinking without effort levels yields no variants (nothing to rotate)", () => {
     expect(Object.keys(toModelV2(GLM51).variants ?? {})).toEqual([]);
-  });
-
-  test("non-string entries are dropped (isCatalog only checks the array shape)", () => {
-    const dirty = {
-      ...GLM53,
-      reasoningOptions: ["low", 42, null, "high"],
-    } as unknown as CatalogModel;
-    expect(Object.keys(toModelV2(dirty).variants ?? {})).toEqual([
-      "low",
-      "high",
-    ]);
   });
 
   test("thinking capability is still exposed as capabilities.reasoning", () => {
@@ -72,22 +63,21 @@ describe("toModelV2 interleaved", () => {
     expect(toModelV2(noThink).capabilities.interleaved).toBe(false);
   });
 });
-// Official Ollama Cloud rate (a catalog/pricing.json entry, USD per 1M) —
-// joined by id at plugin load and passed to toModelV2 as the `rate`. The
-// knob is opt-out: default on, "off" is the only off, legacy "reference"
-// keeps pricing on.
-const OFFICIAL = {
+// Official Ollama Cloud rate (USD per 1M) — now embedded in the catalog
+// entry's cost block and normalized into `cost` by the loader. The knob is
+// opt-out: default on, "off" is the only off, legacy "reference" keeps
+// pricing on.
+const OFFICIAL: PricingRate = {
   input: 0.44,
   output: 1.32,
   cachedInput: 0.014,
-  unit: "per-1M" as const,
-  source: "https://ollama.com/pricing",
-  asOf: "2026-09-01",
 };
 
 describe("toModelV2 pricing", () => {
+  const priced = { ...GLM53, cost: OFFICIAL };
+
   test("default (on) wires the official rate into the cost counter", () => {
-    expect(toModelV2(GLM53, undefined, OFFICIAL).cost).toEqual({
+    expect(toModelV2(priced).cost).toEqual({
       input: 0.44,
       output: 1.32,
       cache: { read: 0.014, write: 0 },
@@ -95,14 +85,14 @@ describe("toModelV2 pricing", () => {
   });
 
   test("pricing: off keeps the counter at zero even with a rate", () => {
-    expect(toModelV2(GLM53, "off", OFFICIAL).cost).toEqual({
+    expect(toModelV2(priced, "off").cost).toEqual({
       input: 0,
       output: 0,
       cache: { read: 0, write: 0 },
     });
   });
 
-  test("model without a table entry stays at $0 even with pricing on (no partial estimates)", () => {
+  test("model without a cost entry stays at $0 even with pricing on (no partial estimates)", () => {
     expect(toModelV2(GLM53).cost).toEqual({
       input: 0,
       output: 0,
@@ -112,7 +102,7 @@ describe("toModelV2 pricing", () => {
 
   test("rate without cachedInput → cache.read 0, never NaN", () => {
     const { cachedInput: _drop, ...noCache } = OFFICIAL;
-    expect(toModelV2(GLM53, undefined, noCache).cost.cache).toEqual({
+    expect(toModelV2({ ...GLM53, cost: noCache }).cost.cache).toEqual({
       read: 0,
       write: 0,
     });

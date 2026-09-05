@@ -26,7 +26,7 @@ import {
   type HandoffFile,
 } from "./handoff.ts";
 import { readUpdateRecord } from "./self-update.ts";
-import { loadCatalog, loadPricing, type Catalog } from "./catalog.ts";
+import { loadCatalog, type Catalog } from "./catalog.ts";
 import type { SessionSummary } from "./stats.ts";
 import { appendBoundedLog } from "./debug-sink.ts";
 import { join } from "node:path";
@@ -142,11 +142,11 @@ const logToOpencode = (api: TuiLike, ...message: unknown[]): void => {
 // /model consults the catalog; memoize the promise (TTL) so opening the
 // dialog never races the CDN mirrors every time. The catalogUrl is the one
 // the user configured (either entry — same doors as the server entry), set
-// once at module entry; a custom catalog rides with NO rate table (the
-// rateless contract) instead of mixing our rates into its ids.
+// once at module entry; a custom catalog without cost entries rides
+// rateless (dashes on the card) — its ids, our rates never mixed in.
 let catalogUrl: string | undefined;
 
-// Shared TTL memo behind catalogOnce/pricingOnce: one promise per window,
+// Shared TTL memo behind catalogOnce: one promise per window,
 // failures degrade to null and are retried only after the TTL expires.
 function ttlMemo<T>(load: () => Promise<T>): () => Promise<T | null> {
   const TTL_MS = 60_000;
@@ -160,10 +160,6 @@ function ttlMemo<T>(load: () => Promise<T>): () => Promise<T | null> {
 }
 
 const catalogOnce = ttlMemo(() => loadCatalog({ catalogUrl }));
-
-// The official-rate table joins the catalog for the /model card; memoized on
-// the same TTL and equally best-effort (no table → the card shows dashes).
-const pricingOnce = ttlMemo(() => loadPricing({ catalogUrl }));
 
 // The /stats body is the same string at open and on every live re-render:
 // one computation, one model-attribution rule (the header names the LAST
@@ -233,10 +229,7 @@ const showModel = async (api: TuiLike, pricingOn: boolean): Promise<void> => {
     let title = "/model";
     if (modelID) {
       try {
-        const [catalog, rates] = await Promise.all([
-          catalogOnce(),
-          pricingOnce(),
-        ]);
+        const catalog = await catalogOnce();
         const model: Catalog["models"][number] | undefined =
           catalog?.models.find((m) => m.id === modelID);
         if (model) {
@@ -246,11 +239,10 @@ const showModel = async (api: TuiLike, pricingOn: boolean): Promise<void> => {
             family: model.family,
             releaseDate: model.releaseDate,
             quantization: model.quantization,
-            quantizationSource: model.sources?.quantization,
             context: model.context,
             maxOutput: model.maxOutput,
             capabilities: model.capabilities,
-            pricing: rates?.[model.id] ?? null,
+            pricing: model.cost ?? null,
           };
           body = formatModelCard(card, pricingOn);
         } else {

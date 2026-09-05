@@ -1,7 +1,7 @@
 # @srnoob2570/opencode-ollama-cloud
 
 [![npm](https://img.shields.io/npm/v/@srnoob2570/opencode-ollama-cloud)](https://www.npmjs.com/package/@srnoob2570/opencode-ollama-cloud)
-[![Catalog update](https://github.com/srnoob2570/opencode-ollama-cloud/actions/workflows/update.yml/badge.svg)](https://github.com/srnoob2570/opencode-ollama-cloud/actions/workflows/update.yml)
+[![Catalog update](https://github.com/srnoob2570/ollama-cloud-catalog/actions/workflows/update-catalog.yml/badge.svg)](https://github.com/srnoob2570/ollama-cloud-catalog/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [Read in English →](README.md)
@@ -11,7 +11,7 @@ Plugin de [opencode](https://opencode.ai) que registra el proveedor **Ollama Clo
 models.dev (la fuente de modelos de opencode) se actualiza manualmente por PR y se queda desactualizado. Este plugin consume un catálogo estático mantenido por GitHub Actions, así que los modelos nuevos aparecen sin esperar a nadie.
 
 > [!NOTE]
-> **Transparencia:** este plugin, su actualizador de catálogo y esta documentación fueron generados y son mantenidos con asistencia de IA ([opencode](https://opencode.ai)). Revisa el código antes de confiar en él para algo sensible.
+> **Transparencia:** este plugin y esta documentación fueron generados y son mantenidos con asistencia de IA ([opencode](https://opencode.ai)). Revisa el código antes de confiar en él para algo sensible.
 
 ## Inicio rápido
 
@@ -59,17 +59,13 @@ ollama-cloud/qwen3.5:397b
 
 ```mermaid
 flowchart LR
-  A["ollama.com<br>/v1/models · /library/*"] --> B["update-catalog.ts<br>GitHub Action · 15 min"]
-  B --> C["catalog/catalog.json<br>jsDelivr · raw · auto-commit"]
+  A["ollama.com<br>/v1/models · /api/show · /pricing"] --> B["ollama-cloud-catalog<br>GitHub Actions · hash-gated"]
+  B --> C["catalog.json<br>jsDelivr · raw · auto-commit"]
   C --> D["opencode-ollama-cloud<br>fallback: cache · models.dev"]
   D --> E["opencode"]
 ```
 
-**Action** (`.github/workflows/update.yml`): corre `bun scripts/update-catalog.ts update` con cron cada 15 minutos. Barato por diseño. El check es 1 GET a `/v1/models`; el scraping solo ocurre si la lista cambió (o una vez por semana, para refrescar los datos de enriquecimiento). El catálogo actualizado se valida (`bun scripts/validate-catalog.ts`) antes de commitear. Peor caso de staleness ≈ 15 min + propagación CDN.
-
-- `check`: compara el hash de `{id, created}` de `/v1/models` contra el catálogo commiteado. Sin scraping.
-- `update`: si el hash cambió (o el catálogo tiene más de 7 días), scrapea `ollama.com/library/<base>` (1 request por familia, ~15 requests), enriquece con datos sembrados de models.dev (max output tokens, fechas de release) y escribe `catalog/catalog.json`. Si no cambió, no toca nada. Si un scrape falla y no hay datos previos que conservar, el update aborta en vez de publicar un catálogo degradado.
-- `validate`: puerta estructural y de sanidad para `catalog/catalog.json` (la usa CI; corréla localmente tras editar a mano).
+**Upstream** ([srnoob2570/ollama-cloud-catalog](https://github.com/srnoob2570/ollama-cloud-catalog)): GitHub Actions construyen y publican `catalog.json` — un documento con la forma de models.dev más la extensión `x_ollama`. El build está compuertizado por el hash de `/v1/models` (un cambio en `{id, created}` dispara la re-extracción completa), las specs vienen de `/api/show` de Ollama y la rate card se parsea con un LLM hacia el bloque `cost` de cada entrada. Fail-loud por contrato: un scrape que falla aborta en vez de publicar un catálogo degradado.
 
 **Plugin** (`plugin/index.ts`): hook `config` registra el provider (idempotente) y hook `provider` devuelve los modelos normalizados al schema de opencode, con cascada de fallback:
 
@@ -120,9 +116,9 @@ flowchart LR
 }
 ```
 
-El catálogo trae la tarifa oficial de Ollama Cloud por modelo: precios de input, cached input y output en USD por 1M de tokens, tomados de la [rate card](https://ollama.com/pricing) pública de Ollama en `catalog/pricing.json`. Es lo que tus créditos pagan de verdad por token, así que el contador de costos de opencode la muestra por defecto (`pricing: "off"` la apaga). Los modelos sin tarifa quedan en $0.
+El catálogo trae la tarifa oficial de Ollama Cloud por modelo: precios de input, cached input y output en USD por 1M de tokens, extraídos de la [rate card](https://ollama.com/pricing) pública de Ollama y embebidos en el bloque `cost` de cada entrada del catálogo. Es lo que tus créditos pagan de verdad por token, así que el contador de costos de opencode la muestra por defecto (`pricing: "off"` la apaga). Los modelos sin tarifa quedan en $0.
 
-Actualizar la tabla es un workflow manual de GitHub Actions (`.github/workflows/update-pricing.yml`). Disparás `update-pricing` desde la pestaña Actions (o `gh workflow run update-pricing`) y fetcha la rate card viva, imprime un diff tarifa-por-tarifa en el log del run, reescribe `catalog/pricing.json` y commitea el cambio, purgando la caché de jsDelivr para que los usuarios reciban las tarifas nuevas. Si la página y el catálogo no cuadran (un modelo nuevo o retirado), aborta con un reporte y no escribe nada. No hay ningún schedule; las tarifas cambian solo cuando vos disparás el run. El mismo script funciona desde tu máquina (`bun run update-pricing`), y el update automático del catálogo jamás toca el pricing.
+Actualizar la tabla es trabajo del repo upstream ([ollama-cloud-catalog](https://github.com/srnoob2570/ollama-cloud-catalog)): su workflow `update-pricing` corre semanalmente (y bajo demanda) y reescribe el artifact con verificación de cobertura bidireccional — si la página y el catálogo no cuadran (un modelo nuevo o retirado), aborta sin escribir nada. Los picos de tarifa quedan documentados en la extensión `x_ollama` del artifact; el plugin muestra siempre la tarifa estándar.
 
 ## Estadísticas de streaming y ficha de modelo
 
@@ -216,23 +212,23 @@ fail-silent).
 
 ### Cuantización: declarada, no garantizada
 
-La cuantización de la ficha es el valor que Ollama declara para el modelo que
-sirve (`file_type` del registry, contrastado con `/api/show`), investigado por
-modelo y transportado en el catálogo. No garantiza la precisión a la que corre
-realmente la inferencia remota. Los modelos sin fuente pública defendible
-muestran `unknown` (nunca se inventan); los modelos fuera del catálogo
-muestran `—`.
+La cuantización de la ficha es el valor que Ollama declara en `/api/show`
+para el modelo que sirve (`details.quantization_level`), extraído por el
+pipeline upstream y transportado en el catálogo. No garantiza la precisión a
+la que corre realmente la inferencia remota. Los modelos sin fuente pública
+defendible muestran `unknown` (nunca se inventa); los modelos fuera del
+catálogo muestran `—`.
 
 La idea de las stats de streaming la propuso el usuario de GitHub
 [@adilfaisal01](https://github.com/adilfaisal01).
 
 ## Desarrollo
 
+Este repo ya no genera el catálogo: vive en [srnoob2570/ollama-cloud-catalog](https://github.com/srnoob2570/ollama-cloud-catalog) (Bun + TypeScript, compuertizado por hash, fail-loud).
+
 ```bash
 bun install
-bun run check           # ¿cambió la lista de modelos? (sin scraping)
-bun run update          # regenera catalog/catalog.json si cambió
-bun run update --force  # regenera aunque la lista no cambie (enriquecimiento nuevo)
+bun test
 bun run typecheck
 ```
 

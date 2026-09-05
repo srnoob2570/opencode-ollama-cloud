@@ -108,9 +108,6 @@ export interface ModelCard {
   family: string;
   releaseDate: string;
   quantization?: string;
-  /** Catalog provenance (sources.quantization) — implicit rows must not be
-   * labeled "(declarada)": Ollama does not declare them (code-review finding). */
-  quantizationSource?: string;
   context: number;
   maxOutput: number;
   capabilities: { tools: boolean; thinking: boolean; vision: boolean };
@@ -121,14 +118,15 @@ export interface ModelCard {
   } | null;
 }
 
-/** The /model card (mock §3) — quantization is the protagonist. */
+/** The /model card (mock §3) — quantization is the protagonist. The value
+ * always comes declared by Ollama (/api/show quantization_level; "unknown"
+ * is Ollama's own honest empty), so there is no provenance branch anymore. */
 export function formatModelCard(model: ModelCard, pricingOn: boolean): string {
-  const implicit = model.quantizationSource?.startsWith("implicit") ?? false;
   const quantization = !model.quantization
     ? "— (unavailable)"
     : model.quantization === "unknown"
       ? "unknown"
-      : `${model.quantization} ${implicit ? "(implicit)" : "(declared)"}`;
+      : `${model.quantization} (declared)`;
   const rows = [
     `  Name              ${model.name}                ollama-cloud`,
     `  ${model.id} · family ${model.family} · ${model.releaseDate}`,
@@ -140,9 +138,7 @@ export function formatModelCard(model: ModelCard, pricingOn: boolean): string {
       ? [`  Official rate     ${officialRate(model.pricing)}`]
       : []),
     "",
-    implicit
-      ? `  quantization researched from public sources. Does`
-      : `  quantization declared by Ollama. Does not`,
+    `  quantization declared by Ollama. Does not`,
     `  guarantee the precision actually served.`,
   ];
   return rows.join("\n");

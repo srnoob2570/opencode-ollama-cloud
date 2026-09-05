@@ -1,5 +1,5 @@
 import type { Model as ModelV2 } from "@opencode-ai/sdk/v2";
-import { PROVIDER_ID, type CatalogModel, type PricingRate } from "./catalog.ts";
+import { PROVIDER_ID, type CatalogModel } from "./catalog.ts";
 
 // Split out of index.ts: the plugin entry module must export ONLY the plugin
 // factory. opencode's legacy plugin loader calls every exported function of a
@@ -31,16 +31,16 @@ const MODEL_OUTPUT_CAPS = {
 export function toModelV2(
   m: CatalogModel,
   pricing: "off" | "on" = "on",
-  rate?: PricingRate,
 ): ModelV2 {
   const vision = m.capabilities.vision || m.input.includes("image");
   const reasoning = m.capabilities.thinking;
   // prices are USD per 1M tokens — opencode's CostV2 contract. The official
   // Ollama Cloud rate is opt-out: default on, `pricing: "off"` keeps the
-  // counter at $0.00. A model without a table entry stays at $0 in both
-  // modes (no partial estimates). cachedInput feeds cache.read; cache.write
-  // stays 0 — the rate card publishes no cache-write column.
-  const official = pricing === "on" ? rate : undefined;
+  // counter at $0.00. A model without a cost entry (third-party catalogs)
+  // stays at $0 in both modes (no partial estimates). cachedInput feeds
+  // cache.read; cache.write stays 0 — the rate card publishes no cache-write
+  // column.
+  const official = pricing === "on" ? m.cost : undefined;
   return {
     id: m.id,
     providerID: PROVIDER_ID,
@@ -91,12 +91,9 @@ export function toModelV2(
     headers: {},
     release_date: m.releaseDate,
     variants: Object.fromEntries(
-      // isCatalog only checks that reasoningOptions is an array; a hand-edited
-      // or custom-URL catalog could carry non-strings, and garbage effort keys
-      // would surface in the TUI picker and 400 upstream.
-      m.reasoningOptions
-        .filter((effort): effort is string => typeof effort === "string")
-        .map((effort) => [effort, { reasoningEffort: effort }]),
+      // the loader's adapter already dropped non-string entries (isCatalog
+      // checks the array shape only), so every key here is a valid effort
+      m.reasoningOptions.map((effort) => [effort, { reasoningEffort: effort }]),
     ),
   };
 }

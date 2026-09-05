@@ -4,7 +4,6 @@ import {
   PROVIDER_CONFIG,
   PROVIDER_ID,
   loadCatalog,
-  loadPricing,
   type PluginOpts,
 } from "./catalog.ts";
 import { createStatsCapture, type FetchLike } from "./capture.ts";
@@ -93,19 +92,17 @@ const opencodeOllamaCloud: Plugin = async (input, options) => {
       id: PROVIDER_ID,
       models: async (provider) => {
         try {
-          // The official-rate table rides the same mirrors as the catalog and
-          // joins by id; a missing or partial table just leaves those models
-          // at $0 — never a wrong price. With the knob off the table is
-          // never fetched: the opt-out costs zero requests, like stats: off.
-          const [catalog, rates] = await Promise.all([
-            loadCatalog(opts),
-            pricing === "on" ? loadPricing(opts) : Promise.resolve(null),
-          ]);
+          // The official rate lives INSIDE the catalog (each entry's cost
+          // block, off-peak): one fetch, one contract. A missing or partial
+          // cost block just leaves those models at $0 — never a wrong price.
+          // With the knob off the counter is zeroed downstream, at no extra
+          // fetch cost (the catalog is the provider source either way).
+          const catalog = await loadCatalog(opts);
           if (catalog) {
-            // Entries were already validated by isCatalog in loadCatalog/readCache.
+            // Entries were already validated and normalized by loadCatalog.
             const models: Record<string, ModelV2> = {};
             for (const m of catalog.models)
-              models[m.id] = toModelV2(m, pricing, rates?.[m.id]);
+              models[m.id] = toModelV2(m, pricing);
             if (Object.keys(models).length > 0) return models;
           }
           console.warn(

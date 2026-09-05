@@ -1,7 +1,7 @@
 {
   "name": "@srnoob2570/opencode-ollama-cloud",
   "version": "0.1.9",
-  "description": "opencode plugin: live Ollama Cloud model catalog (from ollama.com/v1/models), kept fresh by GitHub Actions",
+  "description": "opencode plugin: live Ollama Cloud model catalog, served from srnoob2570/ollama-cloud-catalog",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -30,16 +30,9 @@
     "plugin/capture.ts",
     "plugin/handoff.ts",
     "plugin/tui-display.ts",
-    "plugin/tui.tsx",
-    "catalog",
-    "catalog.schema.json",
-    "pricing.schema.json"
+    "plugin/tui.tsx"
   ],
   "scripts": {
-    "check": "bun scripts/update-catalog.ts check",
-    "update": "bun scripts/update-catalog.ts update",
-    "update-pricing": "bun scripts/update-pricing.ts",
-    "validate": "bun scripts/validate-catalog.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
@@ -51,8 +44,6 @@
     "@opencode-ai/sdk": "1.18.7",
     "@types/bun": "^1.4.0",
     "@types/node": "^24.0.0",
-    "ajv": "^8.20.0",
-    "ajv-formats": "^3.0.1",
     "typescript": "5.9.3"
   },
   "dependencies": {
