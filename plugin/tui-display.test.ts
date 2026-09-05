@@ -11,6 +11,7 @@ import {
   pickTuiFeatures,
   pricingActive,
   pricingKnob,
+  resolveSessionID,
 } from "./tui-display.ts";
 import type { HandoffFile } from "./handoff.ts";
 import type { SessionSummary, StepMeasurement } from "./stats.ts";
@@ -125,6 +126,42 @@ describe("pickSessionFile (guard: sin sesión activa no se muestra NADA)", () =>
   test("sesión distinta o archivo ausente → null", () => {
     expect(pickSessionFile(file, "s2")).toBeNull();
     expect(pickSessionFile(null, "s1")).toBeNull();
+  });
+});
+
+describe("resolveSessionID (montaje único del slot → ruta como respaldo)", () => {
+  test("los props ganan cuando traen session_id", () => {
+    const route = { current: { type: "session", params: { sessionID: "sR" } } };
+    expect(resolveSessionID("sP", route)).toBe("sP");
+    expect(resolveSessionID("sP", undefined)).toBe("sP");
+  });
+
+  test("sin props: lee route.current.params.sessionID", () => {
+    const route = { current: { type: "session", params: { sessionID: "sR" } } };
+    expect(resolveSessionID(undefined, route)).toBe("sR");
+    expect(resolveSessionID(null, route)).toBe("sR");
+    expect(resolveSessionID("", route)).toBe("sR");
+  });
+
+  test("pantalla home (sin params) o ruta ausente → null, nunca inventa", () => {
+    expect(
+      resolveSessionID(undefined, { current: { type: "home" } }),
+    ).toBeNull();
+    expect(resolveSessionID(undefined, { current: null })).toBeNull();
+    expect(resolveSessionID(undefined, {})).toBeNull();
+    expect(resolveSessionID(undefined, undefined)).toBeNull();
+    expect(resolveSessionID(undefined, null)).toBeNull();
+  });
+
+  test("tipos inesperados en la ruta → null (feature-detected)", () => {
+    expect(
+      resolveSessionID(undefined, { current: { params: { sessionID: 42 } } }),
+    ).toBeNull();
+    expect(
+      resolveSessionID(undefined, { current: { params: "s1" } }),
+    ).toBeNull();
+    expect(resolveSessionID(undefined, { current: 7 })).toBeNull();
+    expect(resolveSessionID(undefined, "s1")).toBeNull();
   });
 });
 

@@ -88,6 +88,7 @@ catalog.json (jsDelivr, purgado tras cada commit / raw.githubusercontent / cache
 - `catalogUrl`: URL alternativa del catálogo (se intenta primero).
 - `timeoutMs`: timeout de cada fetch (default `5000`).
 - `pricing`: `"on"` (default) o `"off"` — si el contador de costos de opencode muestra la tarifa oficial de Ollama Cloud. `pricing: "reference"` (el valor viejo opt-in) sigue funcionando y significa `"on"`.
+- `tui`: `"ensure"` (opt-in, default off) — la entrada server registra ella misma la entrada TUI parcheando el tui.json que opencode va a leer (`$OPENCODE_TUI_CONFIG` si está seteado, si no el global). Idempotente y preserva comentarios; surte efecto en el próximo arranque de la TUI. Instalaciones dev (rutas del repo) jamás parchean nada.
 
 ```json
 {
@@ -133,6 +134,18 @@ siempre. **La entrada de la TUI va en `tui.json`**: desde opencode 1.18, el
 host TUI solo carga sus plugins desde `~/.config/opencode/tui.json` (o el del
 proyecto) — el array `plugin` de `opencode.json` se ignora en el lado TUI.
 
+**Ruta primaria (recomendada para installs por npm)**: el comando del CLI
+registra ambas entradas de una vez (lee el `main` y `exports["./tui"]` del
+paquete y parchea ambas configs):
+
+```bash
+opencode plugin @srnoob2570/opencode-ollama-cloud
+```
+
+Alternativas: setear `tui: "ensure"` en la entrada server (Opciones arriba) y
+dejar que el plugin parchee `tui.json` al arrancar, o editar el archivo a mano
+como abajo.
+
 opencode.json:
 
 ```json
@@ -155,6 +168,18 @@ instalado):
 - `stats`: `"on"` (default) o `"off"` — ponlo en **ambas entradas** (forma de
   tupla, p. ej. `["…", { "stats": "off" }]`) y todo se apaga: sin medición,
   sin UI, exactamente el plugin de siempre.
+
+### Auto-actualización
+
+En cada arranque la entrada server hace un lookup al registry de npm y, si hay
+release más nueva y el plugin vino instalado por npm con un spec sin fijar,
+deja la actualización preparada igual que `@tarquinen/opencode-dcp`: borra el
+wrapper cacheado bajo `~/.cache/opencode/packages/` para que opencode
+reinstale la última al siguiente inicio, muestra un toast ("Updated … Restart
+opencode to finish.") y la TUI muestra un badge `↑ <versión>` junto a la línea
+de stats hasta consumir el update. Installs dev (repo) y specs fijados
+(`…@0.1.8`) jamás se tocan, y un lookup fallido se ignora en silencio (timeout
+de 10 s, fail-silent).
 
 ### Cuantización: declarada, no garantizada
 

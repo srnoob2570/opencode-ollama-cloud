@@ -27,6 +27,28 @@ export function pickSessionFile(
   return file;
 }
 
+/**
+ * Session-id resolution independent of the one-shot slot mount: opencode's
+ * Slot dispatcher renders each plugin renderer ONCE and caches the node, so
+ * when no session existed at mount the props never carry session_id again.
+ * The route accessor (api.route.current → {type:"session",
+ * params:{sessionID}}) is re-read on every refresh instead. Props win (they
+ * are the render's own truth); anything missing/foreign → null, never a guess.
+ */
+export function resolveSessionID(
+  propsSessionID: string | undefined | null,
+  route: unknown,
+): string | null {
+  if (typeof propsSessionID === "string" && propsSessionID)
+    return propsSessionID;
+  const current = (route as { current?: unknown } | null | undefined)?.current;
+  if (!current || typeof current !== "object") return null;
+  const params = (current as { params?: unknown }).params;
+  if (!params || typeof params !== "object") return null;
+  const sid = (params as { sessionID?: unknown }).sessionID;
+  return typeof sid === "string" && sid ? sid : null;
+}
+
 /** Relative timestamp for the /stats dialog ("1m ago"), stable format. */
 export function formatRelativeAge(ts: number, now: number): string {
   // clamp at 0: a future ts (clock skew; ts is the request start, now is

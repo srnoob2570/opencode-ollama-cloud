@@ -54,5 +54,8 @@
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "jsonc-parser": "^3.3.1"
   }
 }

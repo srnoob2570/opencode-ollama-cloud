@@ -88,6 +88,7 @@ Prefer editing the config yourself? Add the plugin to `~/.config/opencode/openco
 - `catalogUrl`: alternative catalog URL (tried first).
 - `timeoutMs`: per-fetch timeout (default `5000`).
 - `pricing`: `"on"` (default) or `"off"` — whether opencode's session cost counter shows the official Ollama Cloud rate. `pricing: "reference"` (the old opt-in value) still works and means `"on"`.
+- `tui`: `"ensure"` (opt-in, default off) — the server entry registers the TUI entry itself by patching the tui.json opencode will read (`$OPENCODE_TUI_CONFIG` when set, else the global one). Idempotent and comment-preserving; takes effect on the next TUI launch. Dev installs (repo paths) never patch anything.
 
 ```json
 {
@@ -114,6 +115,14 @@ The average only counts the **main conversation**: subagents, title generation a
 
 The provider entry stays in `opencode.json`'s `plugin` array as usual. **The TUI entry goes in `tui.json`**: since opencode 1.18, the TUI host only loads its plugins from `~/.config/opencode/tui.json` (or the project's) — the `plugin` array in `opencode.json` is ignored on the TUI side.
 
+**Primary route (recommended for npm installs)**: the CLI command registers both entries in one step (it reads this package's `main` and `exports["./tui"]` and patches both configs):
+
+```bash
+opencode plugin @srnoob2570/opencode-ollama-cloud
+```
+
+Alternatively, set `tui: "ensure"` on the server entry (Options above) and let the plugin patch `tui.json` on boot. Or edit it by hand as below.
+
 opencode.json:
 
 ```json
@@ -132,6 +141,10 @@ opencode.json:
 ```
 
 - `stats`: `"on"` (default) or `"off"` — set it on **both** entries (tuple form, e.g. `["…", { "stats": "off" }]`) turns everything off: no measurement, no UI, exactly yesterday's plugin.
+
+### Self-update
+
+On every boot the server entry does one npm registry lookup and, if a newer release exists and the plugin was installed from npm with an unpinned spec, it stages the update the same way `@tarquinen/opencode-dcp` does: it removes the cached wrapper under `~/.cache/opencode/packages/` so opencode reinstalls the latest on the next start, shows a toast ("Updated … Restart opencode to finish.") and the TUI shows an `↑ <version>` badge next to the stats line until the update is consumed. Repo (dev) installs and pinned specs (`…@0.1.8`) are never touched, and one failed lookup is silently ignored (10 s timeout, fail-silent).
 
 ### Quantization disclosure
 

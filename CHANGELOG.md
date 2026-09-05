@@ -5,6 +5,16 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 
 ## [Unreleased]
 
+### Added
+
+- Self-update (precedent: `@tarquinen/opencode-dcp`). On every boot the server entry does one npm registry lookup (10 s timeout, fail-silent); if a newer release exists and the plugin runs from npm with an unpinned spec, it deletes the cached wrapper under `~/.cache/opencode/packages/` so opencode reinstalls the latest on the next start, raises a toast ("Updated … Restart opencode to finish.") and writes a small record the TUI renders as an `↑ <version>` badge next to the stats line until the update is consumed. Dev installs and pinned specs are never touched; the check runs regardless of `stats: "off"` (it is plugin infrastructure, not stats).
+- `tui: "ensure"` plugin option (opt-in, default off). The TUI host of opencode ≥ 1.18 only reads its plugin list from `tui.json`, so an npm install left the stats UI dead until a manual edit. With the knob on, the server entry — which always loads — registers the TUI entry itself: it patches the tui.json opencode will actually read (`$OPENCODE_TUI_CONFIG` when set, else the global `~/.config/opencode/tui.json`/`tui.jsonc`), surgically and idempotently (comments preserved, existing entries like `["…", { "stats": "off" }]` untouched, backup + atomic rename), never in dev. Takes effect on the next TUI launch. `jsonc-parser` is a new dependency.
+- Session-id resolution for the stats line no longer depends on the one-shot slot mount: when no session existed at TUI mount (fresh start, not a restored one), the TUI plugin now falls back to `api.route.current` to find the session id, so the live line appears instead of the dashes placeholder forever.
+
+### Changed
+
+- Documentation: `opencode plugin @srnoob2570/opencode-ollama-cloud` is now the documented primary install route (it registers both the provider entry and the TUI entry in one command); the manual `tui.json` edit and the new `tui: "ensure"` option are the alternatives.
+
 ## [0.1.8] - 2026-09-03
 
 ### Fixed

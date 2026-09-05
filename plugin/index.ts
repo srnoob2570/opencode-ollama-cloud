@@ -10,6 +10,8 @@ import {
 import { createStatsCapture, type FetchLike } from "./capture.ts";
 import { statsDebugSinkFor } from "./debug-sink.ts";
 import { toModelV2, zeroCost } from "./models.ts";
+import { ensureKnob, ensureTuiPlugin } from "./ensure-tui.ts";
+import { runSelfUpdate } from "./self-update.ts";
 import { pricingKnob } from "./tui-display.ts";
 
 // NOTE: export ONLY the plugin factory from this entry module. opencode's
@@ -25,7 +27,7 @@ import { pricingKnob } from "./tui-display.ts";
 // Pricing knob (opt-out): default on — the rate is the OFFICIAL Ollama Cloud
 // tariff (the public rate card), so only `off` turns it off. Legacy configs
 // saying "reference" (the old opt-in) keep pricing on, never accidentally off.
-const opencodeOllamaCloud: Plugin = async (_input, options) => {
+const opencodeOllamaCloud: Plugin = async (input, options) => {
   const pricing: "off" | "on" = pricingKnob(options?.pricing);
   // Stats knob (ticket 08): default ON — opt-out, the mirror of pricing. In
   // "off" the plugin behaves exactly as before the stats effort: no fetch
@@ -49,6 +51,20 @@ const opencodeOllamaCloud: Plugin = async (_input, options) => {
           debugSink: statsDebugSinkFor(options?.statsDebug),
         })
       : null;
+
+  // Self-update check (precedent: @tarquinen/opencode-dcp): fire-and-forget on
+  // every boot, independent of the stats knob — it is plugin infrastructure,
+  // not stats. runSelfUpdate never throws and no-ops (clearing a stale
+  // update.json) when the plugin runs from the repo (dev install).
+  void runSelfUpdate({ moduleUrl: import.meta.url, client: input.client });
+
+  // Opt-in TUI registration (tui: "ensure"): the TUI host only reads its
+  // plugin list from tui.json and nothing upstream writes it for an npm
+  // install, so with the knob on the server entry — which always loads —
+  // registers the TUI entry itself. Idempotent, comment-preserving, dev is a
+  // no-op; the change takes effect on the next TUI launch.
+  if (ensureKnob(options?.tui) === "ensure")
+    void ensureTuiPlugin({ moduleUrl: import.meta.url });
 
   return {
     ...(capture

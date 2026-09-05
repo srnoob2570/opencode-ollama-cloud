@@ -17,9 +17,11 @@ import {
   pickSessionFile,
   pickTuiFeatures,
   pricingActive,
+  resolveSessionID,
   type ModelCard,
 } from "./tui-display.ts";
 import { createHandoffStore, type HandoffFile } from "./handoff.ts";
+import { readUpdateRecord } from "./self-update.ts";
 import {
   loadCatalog,
   loadPricing,
@@ -52,6 +54,9 @@ interface TuiLike {
   };
   theme: { current: { textMuted?: string; text?: string } };
   state?: { config?: { plugin?: unknown } };
+  // reactive accessor: route.current → {type:"session", params:{sessionID}}
+  // for session screens ({type:"home"} carries no params)
+  route?: { readonly current?: unknown };
   ui: {
     dialog: {
       replace: (render: () => unknown, onClose?: () => void) => void;
@@ -333,12 +338,33 @@ export default {
       }
 
       const [line, setLine] = createSignal<string>(formatLiveLine(null));
+      // update badge (self-update effort): the server writes update.json when
+      // it staged a newer release for the next restart; the TUI shows it as a
+      // suffix on the live line until the record is cleared. Best-effort: the
+      // line survives without it.
+      const [badge, setBadge] = createSignal<string>("");
+      const refreshBadge = async () => {
+        try {
+          const record = await readUpdateRecord();
+          setBadge(record ? `↑ ${record.latest}` : "");
+        } catch {
+          /* the badge is decoration, never a failure */
+        }
+      };
+      void refreshBadge();
       let lastLine: string | null = null;
+      // route fallback: the slot's renderer runs once and its node is cached,
+      // so props.session_id never re-arrives for a session created after
+      // mount — re-reading opencode's route accessor covers that gap
+      const routeSession = (): string | null =>
+        resolveSessionID(undefined, api.route);
       const refresh = async (sessionID?: string) => {
         try {
-          // reads for the prop's session (falling back to the active one);
-          // null → sessionFile returns null → the live line stays on "—"
-          const file = await sessionFile(sessionID);
+          // reads for the prop's session (falling back to the route, then to
+          // the active one); null → sessionFile returns null → "—"
+          const sid = sessionID ?? routeSession();
+          if (sid) activeSessionID = sid;
+          const file = await sessionFile(sid);
           const next = formatLiveLine(file?.summary ?? null);
           // one log line per actual CHANGE of the shown value (idle+trailing
           // re-reads would spam otherwise); errors always log
@@ -346,7 +372,7 @@ export default {
             debug(
               "line:",
               "active=",
-              String(sessionID ?? activeSessionID ?? "none"),
+              String(sid ?? "none"),
               "steps=",
               String(file?.summary?.steps ?? -1),
               "->",
@@ -375,10 +401,19 @@ export default {
           ) => {
             try {
               // only a render that KNOWS the session may update the pointer —
-              // transient prop-less renders keep the last known session
-              if (props?.session_id) activeSessionID = props.session_id;
-              void refresh(props?.session_id);
-              return <text fg={api.theme?.current?.textMuted}> {line()} </text>;
+              // resolved from props first, then from opencode's own route
+              // state; transient prop-less renders keep the last known session
+              const sid = resolveSessionID(props?.session_id, api.route);
+              if (sid) activeSessionID = sid;
+              void refresh(sid ?? undefined);
+              const b = badge();
+              return (
+                <text fg={api.theme?.current?.textMuted}>
+                  {" "}
+                  {line()}
+                  {b ? ` ${b}` : ""}{" "}
+                </text>
+              );
             } catch (error) {
               const msg =
                 error instanceof Error
@@ -449,6 +484,14 @@ export default {
       } catch {
         /* unref is Node/Bun-specific; fine to keep the interval un-unref'd */
       }
+      // the record can land after this TUI mounted (the server's npm fetch is
+      // still in flight at boot) — re-read on a slow floor, best-effort
+      const badgePoll = setInterval(() => void refreshBadge(), 30000);
+      try {
+        badgePoll.unref?.();
+      } catch {
+        /* same as above */
+      }
 
       // disposal: when opencode announces the TUI is going away, release
       // everything this module registered (event subs, poll, dialog-refresh
@@ -467,6 +510,7 @@ export default {
             }
           }
           clearInterval(poll);
+          clearInterval(badgePoll);
           statsDialogOpen = false;
         } catch {
           /* silent-degradation contract: dispose never throws */
