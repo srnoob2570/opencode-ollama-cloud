@@ -1,0 +1,43 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "last_run": "2026-09-05T12:11:18.026Z",
+    "root": "/home/srnoob/Documentos/srnoob2570/opencode-ollama-cloud",
+    "include_patterns": [
+      "plugin/**/*.ts",
+      "plugin/**/*.tsx",
+      "package.json",
+      "tsconfig.json"
+    ],
+    "exclude_patterns": [
+      "**/*.test.ts",
+      "**/*.test.tsx",
+      "node_modules/**",
+      "docs/**",
+      "research/**",
+      "wayfinder/**",
+      ".scratch/**",
+      "bun.lock"
+    ],
+    "exceptions": []
+  },
+  "file_hashes": {
+    "package.json": "aba5ba3e3d7fb29ed9e8665c533ad554",
+    "plugin/capture.ts": "db1897cafc59932b5465219239739be2",
+    "plugin/catalog.ts": "e7bb3bb06d57cfafbc9aba72be5dd61f",
+    "plugin/debug-sink.ts": "7309ff316316123ab542099c3875a34f",
+    "plugin/ensure-tui.ts": "4982a7c1738d542f99dc567d7c322bc9",
+    "plugin/handoff.ts": "581bca25cba3654c98e3c3a92a0ce17e",
+    "plugin/index.ts": "f8f423c769cb627590d2820b88196b5e",
+    "plugin/models.ts": "374c56a7227d0a7802c59d564d95dc68",
+    "plugin/self-update.ts": "39779897d7f64b91a8eca7f00098bc22",
+    "plugin/stats.ts": "83ba7e03d3968aa39b4b87cff04aed24",
+    "plugin/tui-display.ts": "906c3e2f020b7212676e633720b5c7b8",
+    "plugin/tui.tsx": "8b5da02a00ebf4b0ccbbd3eeef1100d9",
+    "tsconfig.json": "43b1f36aab9f310fb819b04809d18a04"
+  },
+  "folder_hashes": {
+    ".": "6288eff93418446b124b1b7635e66303",
+    "plugin": "1d48375bccfa3453b0ddd6f601bfd8d9"
+  }
+}

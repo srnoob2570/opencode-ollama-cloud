@@ -10,5 +10,5 @@
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true
   },
-  "include": ["plugin/**/*.ts", "scripts/**/*.ts"]
+  "include": ["plugin/**/*.ts"]
 }
