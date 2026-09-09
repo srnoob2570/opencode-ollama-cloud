@@ -47,5 +47,5 @@ jobs:
 
       # No NODE_AUTH_TOKEN: trusted publishing authenticates via the OIDC token
       # npmjs.com was told to trust for this repo + workflow filename.
-      - run: npm publish --access public
+      - run: npm stage publish --access public
         if: env.skip != 'true'
