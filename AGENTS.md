@@ -43,4 +43,4 @@ For deep work on a specific folder, also read that folder's `codemap.md`.
 
 ## Vocabulary
 
-Domain terms (`family`, LLM step, TTFT/TPS, ficha de modelo, cuantización) are defined in `CONTEXT.md` — use those exact names in code and docs.
+Domain terms (`family`, LLM step, TTFT/TPS, cuantización) are defined in `CONTEXT.md` — use those exact names in code and docs.

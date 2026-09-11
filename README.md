@@ -98,7 +98,7 @@ The catalog ships the official Ollama Cloud rate per model: input, cached-input 
 
 Rates are refreshed by the catalog repo's scheduled workflow (weekly, plus manual). If the rate card and the catalog disagree (a new or retired model), the update aborts with a report and writes nothing.
 
-## Streaming stats and the model card
+## Streaming stats
 
 The plugin measures what opencode doesn't: TTFT (time to first token) and tokens/s of every LLM step, client-side. For `ollama-cloud` the numbers are wire-accurate because the plugin wraps the provider's `fetch` and reads the final `usage` chunk opencode already requests; for any other provider it derives them from opencode's events. It shows a live session average on the right side of the prompt row (the row with the model name), one row above opencode's own context/cost line. The metrics belong to the session, not the current model: no per-model breakdown, no reset when you switch models.
 
@@ -109,10 +109,6 @@ The line on the right is the plugin's: `197.0 tok/s · TTFT 1298 ms · Session a
 - `/stats`. Session summary plus the latest responses (step-level detail; `wire` vs `event` rows are distinguishable).
 
 ![The /stats dialog with the session average and the most recent responses](docs/img/stats_command.png)
-
-- `/model`. Model card of the active model: quantization, family, capabilities, limits, release date and the official rate (input · cached input · output per 1M; unless `pricing: "off"`).
-
-![The /model dialog showing the model card with quantization and official rate](docs/img/model_command.png)
 
 The average only counts the main conversation. Subagents, title generation and compaction never enter it (measured signals verified against opencode's source). Numbers live in memory per session; nothing is stored and nothing leaves your machine. The stats UI ships as a second plugin entry and degrades silently: on an opencode build where the TUI API moved, the provider and catalog keep working and the stats line simply disappears (tested against opencode 1.18.27; the plugin API it uses exists but is undocumented, so treat the stats UI as best-effort until upstream documents it).
 
@@ -148,10 +144,6 @@ opencode.json:
 ### Self-update
 
 On every boot the server entry does one npm registry lookup. If a newer release exists and the plugin was installed from npm with an unpinned spec, it stages the update the way `@tarquinen/opencode-dcp` does. It removes the cached wrapper under `~/.cache/opencode/packages/` so opencode reinstalls the latest on the next start, shows a toast ("Updated … Restart opencode to finish."), and the TUI shows an `↑ <version>` badge on the stats line until the update is consumed. Repo (dev) installs and pinned specs (`…@0.1.8`) are never touched. A failed lookup is ignored (10 s timeout, fail-silent).
-
-### Quantization disclosure
-
-The model card's quantization is the value Ollama declares for the model it serves (`/api/show` `quantization_level`), carried in the catalog's `x_ollama` block. It does not guarantee the precision the remote inference actually runs at. Models where Ollama declares nothing say `unknown` (never guessed); models outside the catalog show `—`.
 
 Credit where it's due: the streaming-stats idea was proposed by GitHub user [@adilfaisal01](https://github.com/adilfaisal01).
 

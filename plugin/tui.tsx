@@ -10,15 +10,11 @@
 // separate modules in separate processes, sharing ONLY the handoff file.
 import { createSignal } from "solid-js";
 import {
-  configuredCatalogUrl,
   formatLiveLine,
-  formatModelCard,
   formatStatsDialogBody,
   pickSessionFile,
   pickTuiFeatures,
-  pricingActive,
   resolveSessionID,
-  type ModelCard,
 } from "./tui-display.ts";
 import {
   createHandoffStore,
@@ -26,7 +22,6 @@ import {
   type HandoffFile,
 } from "./handoff.ts";
 import { readUpdateRecord } from "./self-update.ts";
-import { loadCatalog, type Catalog } from "./catalog.ts";
 import type { SessionSummary } from "./stats.ts";
 import { appendBoundedLog } from "./debug-sink.ts";
 import { join } from "node:path";
@@ -51,7 +46,6 @@ interface TuiLike {
     on: (type: string, handler: (event: unknown) => void) => () => void;
   };
   theme: { current: { textMuted?: string; text?: string } };
-  state?: { config?: { plugin?: unknown } };
   // reactive accessor: route.current → {type:"session", params:{sessionID}}
   // for session screens ({type:"home"} carries no params)
   route?: { readonly current?: unknown };
@@ -93,9 +87,7 @@ const debug = (...message: unknown[]) =>
 let activeSessionID: string | null = null;
 
 // whether a /stats dialog is currently open (set by showStats, cleared on the
-// confirm/clear path and whenever another dialog of ours replaces it): the
-// 1 s poll re-renders its body while it is open. /model is snapshot-only and
-// never sets this.
+// confirm/clear path): the 1 s poll re-renders its body while it is open.
 let statsDialogOpen = false;
 
 // Handoff reads are throttled but never stale on purpose: each refresh waits
@@ -138,28 +130,6 @@ const logToOpencode = (api: TuiLike, ...message: unknown[]): void => {
     /* logging must never break rendering */
   }
 };
-
-// /model consults the catalog; memoize the promise (TTL) so opening the
-// dialog never races the CDN mirrors every time. The catalogUrl is the one
-// the user configured (either entry — same doors as the server entry), set
-// once at module entry; a custom catalog without cost entries rides
-// rateless (dashes on the card) — its ids, our rates never mixed in.
-let catalogUrl: string | undefined;
-
-// Shared TTL memo behind catalogOnce: one promise per window,
-// failures degrade to null and are retried only after the TTL expires.
-function ttlMemo<T>(load: () => Promise<T>): () => Promise<T | null> {
-  const TTL_MS = 60_000;
-  let cache: { at: number; promise: Promise<T | null> } | null = null;
-  return () => {
-    if (!cache || Date.now() - cache.at > TTL_MS) {
-      cache = { at: Date.now(), promise: load().catch(() => null) };
-    }
-    return cache.promise;
-  };
-}
-
-const catalogOnce = ttlMemo(() => loadCatalog({ catalogUrl }));
 
 // The /stats body is the same string at open and on every live re-render:
 // one computation, one model-attribution rule (the header names the LAST
@@ -220,68 +190,12 @@ const refreshStatsDialog = async (api: TuiLike): Promise<void> => {
   }
 };
 
-const showModel = async (api: TuiLike, pricingOn: boolean): Promise<void> => {
-  try {
-    const file = await sessionFile();
-    const modelID = file?.steps[0]?.modelID;
-    let body =
-      "  Card\n\n  Quantization      — (unavailable)\n\n  (model outside the catalog, nothing estimated)";
-    let title = "/model";
-    if (modelID) {
-      try {
-        const catalog = await catalogOnce();
-        const model: Catalog["models"][number] | undefined =
-          catalog?.models.find((m) => m.id === modelID);
-        if (model) {
-          const card: ModelCard = {
-            id: model.id,
-            name: model.name,
-            family: model.family,
-            releaseDate: model.releaseDate,
-            quantization: model.quantization,
-            context: model.context,
-            maxOutput: model.maxOutput,
-            capabilities: model.capabilities,
-            pricing: model.cost ?? null,
-          };
-          body = formatModelCard(card, pricingOn);
-        } else {
-          title = `/model · ${modelID} (not in catalog)`;
-        }
-      } catch {
-        title = `/model · ${modelID} (catalog unavailable)`;
-      }
-    } else {
-      body =
-        "  No measured responses yet in this session —\n  run /model after a response";
-    }
-    api.ui.dialog.replace(() =>
-      api.ui.DialogAlert({
-        title,
-        message: body,
-        onConfirm: () => api.ui.dialog.clear(),
-      }),
-    );
-    // /model just replaced whatever dialog was open — the /stats dialog is
-    // gone, so the poll must not resurrect it over this card
-    statsDialogOpen = false;
-  } catch (error) {
-    console.warn(
-      "[opencode-ollama-cloud/tui] /model failed silently:",
-      error instanceof Error ? error.message : error,
-    );
-    api.ui.dialog.clear();
-  }
-};
-
 export default {
   id: "opencode-ollama-cloud-tui",
   async tui(
     api: TuiLike,
     options?: {
       stats?: string;
-      pricing?: string;
-      catalogUrl?: string;
     },
   ) {
     debug(
@@ -294,11 +208,6 @@ export default {
         debug("stats off — retiring before any registration");
         return;
       }
-      // Same doors as the server entry: a configured catalogUrl (own options
-      // or the server entry's) replaces the default mirrors for /model.
-      catalogUrl = configuredCatalogUrl(api.state?.config, {
-        catalogUrl: options?.catalogUrl,
-      });
       const features = pickTuiFeatures(api);
       debug("features:", JSON.stringify(features));
       if (!features.slots) {
@@ -493,10 +402,6 @@ export default {
       }
 
       if (features.keymap) {
-        // the pricing knob lives on the server entry (README) — scan config
-        const pricingOn = pricingActive(api.state?.config, {
-          pricing: options?.pricing,
-        });
         api.keymap.registerLayer({
           commands: [
             {
@@ -507,16 +412,6 @@ export default {
               slashName: "stats",
               run() {
                 void showStats(api);
-              },
-            },
-            {
-              name: "opencode-ollama-cloud.model.show",
-              title: "Model card",
-              category: "Ollama Cloud",
-              namespace: "palette",
-              slashName: "model",
-              run() {
-                void showModel(api, pricingOn);
               },
             },
           ],

@@ -98,7 +98,7 @@ El catálogo trae la tarifa oficial de Ollama Cloud por modelo: precios de input
 
 Actualizar la tabla es trabajo del repo upstream ([ollama-cloud-catalog](https://github.com/srnoob2570/ollama-cloud-catalog)): su workflow `update-pricing` corre semanalmente (y bajo demanda) y reescribe el artifact con verificación de cobertura bidireccional — si la página y el catálogo no cuadran (un modelo nuevo o retirado), aborta sin escribir nada. Los picos de tarifa quedan documentados en la extensión `x_ollama` del artifact; el plugin muestra siempre la tarifa estándar.
 
-## Estadísticas de streaming y ficha de modelo
+## Estadísticas de streaming
 
 El plugin mide lo que opencode no guarda: TTFT (tiempo hasta el primer
 token) y tokens/s de cada LLM step, del lado del cliente. En `ollama-cloud`
@@ -121,12 +121,6 @@ toca.
   filas `wire` y `event` son distinguibles).
 
 ![El diálogo /stats con el promedio de sesión y las respuestas recientes](docs/img/stats_command.png)
-
-- `/model`. Ficha del modelo activo: cuantización, familia, capacidades,
-  límites, release y la tarifa oficial (input · cached input · output por 1M;
-  salvo `pricing: "off"`).
-
-![El diálogo /model con la ficha del modelo: cuantización y tarifa oficial](docs/img/model_command.png)
 
 El promedio solo cuenta el chat principal. Subagentes, titlegen y compaction
 jamás entran (señales verificadas contra el código de opencode). Los números
@@ -187,15 +181,6 @@ opencode to finish.") y la TUI muestra un badge `↑ <versión>` sobre la línea
 de stats hasta consumir el update. Installs dev (repo) y specs fijados
 (`…@0.1.8`) jamás se tocan. Un lookup fallido se ignora (timeout de 10 s,
 fail-silent).
-
-### Cuantización: declarada, no garantizada
-
-La cuantización de la ficha es el valor que Ollama declara en `/api/show`
-para el modelo que sirve (`details.quantization_level`), extraído por el
-pipeline upstream y transportado en el catálogo. No garantiza la precisión a
-la que corre realmente la inferencia remota. Los modelos sin fuente pública
-defendible muestran `unknown` (nunca se inventa); los modelos fuera del
-catálogo muestran `—`.
 
 La idea de las stats de streaming la propuso el usuario de GitHub
 [@adilfaisal01](https://github.com/adilfaisal01).

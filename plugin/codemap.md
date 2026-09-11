@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-An opencode plugin (Bun + TS, no bundler) that registers the `ollama-cloud` provider with a live model list served from an upstream catalog artifact, wired with official-rate pricing and `reasoning_effort` variants. A second, TUI-side entry adds streaming metrics (TTFT/TPS per LLM step), a live status line, the `/stats` and `/model` commands, and the model card. Server and TUI entries share state only through on-disk files (handoff snapshots, catalog/update caches).
+An opencode plugin (Bun + TS, no bundler) that registers the `ollama-cloud` provider with a live model list served from an upstream catalog artifact, wired with official-rate pricing and `reasoning_effort` variants. A second, TUI-side entry adds streaming metrics (TTFT/TPS per LLM step), a live status line and the `/stats` command. Server and TUI entries share state only through on-disk files (handoff snapshots, catalog/update caches).
 
 ## Design
 
@@ -15,15 +15,15 @@ An opencode plugin (Bun + TS, no bundler) that registers the `ollama-cloud` prov
 - `debug-sink.ts` — `appendBoundedLog` (256 KB cap, truncates to 128 KB tail); `statsDebugSinkFor` gates the opt-in claim-instrumentation sink.
 - `self-update.ts` — `parseModuleOrigin` (detects npm wrapper under `~/.cache/opencode/packages` via `node_modules` marker), pinned-version guard, `compareSemver`/`decideUpdate`, `fetchLatestVersion` (one registry probe), `runSelfUpdate` (evicts wrapper dir so next `Npm.add` reinstalls, writes `update.json`, optional toast).
 - `ensure-tui.ts` — `patchTuiConfigText`: pure text→text jsonc patch (comment-preserving, idempotent, tuple-aware `specEntryMatches`); `ensureTuiPlugin` orchestrates file selection (`OPENCODE_TUI_CONFIG` → `tui.json` → `tui.jsonc` → template), mtime-retry + `.bak` rollback, npm-origin gate.
-- `tui.tsx` — TUI entry (default `{ id, tui }`): feature-detection via `pickTuiFeatures`, registers the `session_prompt_right` slot (live line + `↑ version` badge), keymap layer with `/stats` (live re-rendered dialog) and `/model` (snapshot card), `ttlMemo` (60 s) behind `catalogOnce`, throttled fresh handoff reads (~120 ms), event subs + 1 s convergence poll, idempotent `dispose`. Silent degradation: any missing API retires the module without touching the server side.
-- `tui-display.ts` — pure string contract: `formatLiveLine`, `pickSessionFile` (cross-session staleness guard), `resolveSessionID` (props → route fallback), `formatStatsDialogBody`/`formatStepRow`/`formatRelativeAge`, `formatModelCard` (quantization as protagonist), plus shared knob scanners `pricingActive` and `configuredCatalogUrl` (reads the other entry's options from opencode config).
+- `tui.tsx` — TUI entry (default `{ id, tui }`): feature-detection via `pickTuiFeatures`, registers the `session_prompt_right` slot (live line + `↑ version` badge), keymap layer with `/stats` (live re-rendered dialog), throttled fresh handoff reads (~120 ms), event subs + 1 s convergence poll, idempotent `dispose`. Silent degradation: any missing API retires the module without touching the server side.
+- `tui-display.ts` — pure string contract: `formatLiveLine`, `pickSessionFile` (cross-session staleness guard), `resolveSessionID` (props → route fallback), `formatStatsDialogBody`/`formatStepRow`/`formatRelativeAge`, plus the shared `pricingKnob` rule.
 
 ## Flow
 
 1. opencode loads `plugin/index.ts` (exports `.` and `./server`); the factory parses knobs, spawns `runSelfUpdate` and (opt-in `tui: "ensure"`) `ensureTuiPlugin`, then returns hooks.
 2. `provider.models` hook → `loadCatalog(opts)` → URL order (`catalogUrl` first, then jsDelivr, then raw GitHub), all mirrors raced in parallel with `AbortSignal.timeout` (default 5 s); first validated doc wins → cached to disk → `toCatalogModel` per entry → `toModelV2` per model. Unreachable/invalid catalog → `console.warn` → fallback: models.dev's `provider.models` passthrough zeroed with `zeroCost()` (never a wrong price).
 3. `config` hook wraps `options.fetch` with `capture.wireFetch`; SSE chat responses are tee'd, `measurementFromWire` builds a step (TTFT = first chunk − t0, decode = last − first, tokens from the final usage chunk) and pends it in the session's collector; `message.updated` claims it through `claimPendingWire` + `isMainStep`, then `persist` writes `stats-<sessionID>.json` (monotonic-fingerprint race policy).
-4. opencode separately loads `plugin/tui.tsx` (export `./tui`); `tui(api, options)` resolves `catalogUrl`/pricing from config or own options, registers the slot and `/stats` + `/model`; handoff reads target exactly the active session's file (`pickSessionFile` guard). `/model` consults the TTL-memoized catalog and renders `formatModelCard`; a model outside the catalog shows only what's known, nothing estimated.
+4. opencode separately loads `plugin/tui.tsx` (export `./tui`); `tui(api, options)` registers the slot and `/stats`; handoff reads target exactly the active session's file (`pickSessionFile` guard).
 5. Boot-time extras: `runSelfUpdate` (npm installs only) stages the newer version by evicting the wrapper cache and records `update.json`, which the TUI reads as a badge; `ensureTuiPlugin` patches `tui.json` so the TUI entry loads on next launch.
 
 ## Integration

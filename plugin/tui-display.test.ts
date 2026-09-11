@@ -1,15 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   EMPTY_SESSION_LINE,
-  configuredCatalogUrl,
   formatLiveLine,
-  formatModelCard,
   formatRelativeAge,
   formatStatsDialogBody,
   formatStepRow,
   pickSessionFile,
   pickTuiFeatures,
-  pricingActive,
   pricingKnob,
   resolveSessionID,
 } from "./tui-display.ts";
@@ -165,61 +162,6 @@ describe("resolveSessionID (montaje único del slot → ruta como respaldo)", ()
   });
 });
 
-describe("ficha /model (mock §3 — tres estados de cuantización)", () => {
-  const model = (
-    over: Parameters<typeof formatModelCard>[0] extends infer M
-      ? Partial<M>
-      : never = {},
-  ) => ({
-    id: "glm-5.3",
-    name: "GLM 5.3",
-    family: "glm",
-    releaseDate: "2026-08-14",
-    quantization: "FP8",
-    context: 1_048_576,
-    maxOutput: 131_072,
-    capabilities: { tools: true, thinking: true, vision: false },
-    pricing: { input: 0.7, output: 1.75, cachedInput: 0.02 },
-    ...over,
-  });
-
-  test("cuantización declarada + nota al pie + tarifa oficial según knob", () => {
-    const card = formatModelCard(model(), true);
-    expect(card).toContain("FP8 (declared)");
-    expect(card).toContain("quantization declared by Ollama. Does not");
-    // base decimal (1M = 1_000_000): 1_048_576 → 1M, 131_072 → 131k (no 128k)
-    expect(card).toContain("1M");
-    expect(card).toContain("131k");
-    expect(card).toContain(
-      "Official rate     $0.7 in · $0.02 cached · $1.75 out per 1M",
-    );
-    const off = formatModelCard(model(), false);
-    expect(off).not.toContain("Official rate");
-  });
-
-  test("sin cachedInput la columna se muestra como —, nunca inventa", () => {
-    const noCache = model({ pricing: { input: 0.7, output: 1.75 } });
-    expect(formatModelCard(noCache, true)).toContain(
-      "Official rate     $0.7 in · — cached · $1.75 out per 1M",
-    );
-  });
-
-  test("fuera de catálogo (pricing null) → guiones, nunca 0", () => {
-    expect(formatModelCard(model({ pricing: null }), true)).toContain(
-      "Official rate     — in · — cached · — out per 1M",
-    );
-  });
-
-  test("sin fuente defendible → desconocida; fuera de catálogo → —", () => {
-    expect(
-      formatModelCard(model({ quantization: "unknown" }), false),
-    ).toContain("Quantization      unknown");
-    expect(
-      formatModelCard(model({ quantization: undefined }), false),
-    ).toContain("Quantization      — (unavailable)");
-  });
-});
-
 describe("pickTuiFeatures (degradación silenciosa)", () => {
   test("un api completo habilita slots y keymap", () => {
     const api = {
@@ -244,108 +186,5 @@ describe("pricingKnob (la regla solo-off vive en UN lado, code review)", () => {
     expect(pricingKnob(undefined)).toBe("on");
     expect(pricingKnob("reference")).toBe("on");
     expect(pricingKnob("off")).toBe("off");
-  });
-});
-
-describe("configuredCatalogUrl (la ficha usa las mismas puertas que el server)", () => {
-  test("toma el catalogUrl de la propia entrada TUI", () => {
-    expect(
-      configuredCatalogUrl(
-        { plugin: [] },
-        { catalogUrl: "https://x/cat.json" },
-      ),
-    ).toBe("https://x/cat.json");
-  });
-
-  test("escanea el catalogUrl configurado en la entrada server", () => {
-    const config = {
-      plugin: [
-        [
-          "@srnoob2570/opencode-ollama-cloud",
-          { catalogUrl: "https://y/cat.json" },
-        ],
-        ["@srnoob2570/opencode-ollama-cloud/tui", {}],
-      ],
-    };
-    expect(configuredCatalogUrl(config, {})).toBe("https://y/cat.json");
-  });
-
-  test("ignora catalogUrl de otros paquetes y valores no-string", () => {
-    const config = {
-      plugin: [["otro-plugin", { catalogUrl: "https://z/cat.json" }]],
-    };
-    expect(configuredCatalogUrl(config, {})).toBeUndefined();
-    expect(
-      configuredCatalogUrl(
-        {
-          plugin: [["@srnoob2570/opencode-ollama-cloud", { catalogUrl: 42 }]],
-        },
-        {},
-      ),
-    ).toBeUndefined();
-  });
-
-  test("sin configuración → undefined (mirrors por defecto)", () => {
-    expect(configuredCatalogUrl(undefined, {})).toBeUndefined();
-    expect(configuredCatalogUrl({ plugin: [] }, {})).toBeUndefined();
-  });
-});
-
-describe("pricingActive (opt-out: on por defecto, solo `off` apaga)", () => {
-  test("default on sin config ni opciones (la tarifa es oficial, no pide permiso)", () => {
-    expect(pricingActive(undefined, {})).toBe(true);
-    expect(pricingActive({ plugin: [] }, undefined)).toBe(true);
-  });
-
-  test("pricing: off en la entrada TUI apaga", () => {
-    expect(pricingActive({ plugin: [] }, { pricing: "off" })).toBe(false);
-  });
-
-  test("pricing: off en CUALQUIER entrada del paquete apaga", () => {
-    const config = {
-      plugin: [
-        ["@srnoob2570/opencode-ollama-cloud", { pricing: "off" }],
-        ["@srnoob2570/opencode-ollama-cloud/tui", {}],
-      ],
-    };
-    expect(pricingActive(config, {})).toBe(false);
-  });
-
-  test("el alias legacy `reference` y los valores desconocidos NO apagan", () => {
-    const config = {
-      plugin: [["@srnoob2570/opencode-ollama-cloud", { pricing: "reference" }]],
-    };
-    expect(pricingActive(config, {})).toBe(true);
-    expect(pricingActive({ plugin: [] }, { pricing: "reference" })).toBe(true);
-  });
-
-  test("otro paquete con pricing: off no apaga el nuestro", () => {
-    const config = {
-      plugin: [["otro-plugin", { pricing: "off" }]],
-    };
-    expect(pricingActive(config, {})).toBe(true);
-  });
-});
-// La procedencia implícita ya no existe: la cuantización del artifact SIEMPRE
-// viene declarada por Ollama (/api/show quantization_level) — un solo camino
-// de renderizado, sin ramas de fuente.
-describe("ficha /model — cuantización siempre declarada", () => {
-  const base = {
-    id: "glm-5.2",
-    name: "GLM 5.2",
-    family: "glm",
-    releaseDate: "2026-08",
-    quantization: "FP8",
-    context: 1_048_576,
-    maxOutput: 131_072,
-    capabilities: { tools: true, thinking: false, vision: false },
-  };
-
-  test("cada cuantización presente se rotula «(declared)» y atribuye a Ollama", () => {
-    const card = formatModelCard(base, false);
-    expect(card).toContain("FP8 (declared)");
-    expect(card).toContain("quantization declared by Ollama. Does not");
-    expect(card).not.toContain("(implicit)");
-    expect(card).not.toContain("researched from public sources");
   });
 });
