@@ -3,6 +3,14 @@
 Entries here follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [SemVer](https://semver.org/spec/v2.0.0.html).
 Each version also lives on the [releases page](https://github.com/srnoob2570/opencode-ollama-cloud/releases).
 
+## [0.1.11] - 2026-09-11
+
+### Removed
+
+- The TUI plugin no longer registers its own `/model` command. It shadowed opencode's native `/model` picker, which now opens as expected. The model card goes with it: family, quantization, capabilities, limits, release date, official rates and token sizes. The stats line, `/stats` and the pricing the plugin reports are unchanged.
+
+**Full changelog:** https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.10...v0.1.11
+
 ## [0.1.10] - 2026-09-05
 
 ### Changed
