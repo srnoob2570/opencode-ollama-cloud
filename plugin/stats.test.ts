@@ -261,6 +261,23 @@ describe("StatsCollector (in-memory, vivo, sin persistencia)", () => {
     expect(c.summary().tokensOutTotal).toBe(90);
   });
 
+  test("direct route (V2): record joins the store without pend/claim", () => {
+    const c = makeCollector();
+    c.record({
+      sessionID: "s1",
+      providerID: "ollama-cloud",
+      modelID: "glm-5.3",
+      ttftMs: 120,
+      tokensOut: 9,
+      decodeMs: 300,
+      source: "wire",
+      ts: 5,
+    });
+    expect(c.summary().steps).toBe(1);
+    expect(c.summary().tokensOutTotal).toBe(9);
+    expect(c.recent(1)[0].modelID).toBe("glm-5.3");
+  });
+
   test("wire route: child sessions never pend (subagentes fuera, antes de correlacionar)", () => {
     const c = makeCollector();
     c.pend(

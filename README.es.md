@@ -200,6 +200,68 @@ catálogo muestran `—`.
 La idea de las stats de streaming la propuso el usuario de GitHub
 [@adilfaisal01](https://github.com/adilfaisal01).
 
+## Soporte para opencode 2.x
+
+El mismo paquete soporta opencode 1.x y 2.x (la beta V2). Ambas entradas son
+duales: V1 llama a `server()` / `tui()`, V2 lee el objeto por defecto (`id` +
+`setup()`). El código V1 no se toca.
+
+Instalación en V2 (la clave de configuración en V2 es `plugins`; el CLI V2
+también puede agregarlo con `opencode2 plugin add`):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["@srnoob2570/opencode-ollama-cloud"]
+}
+```
+
+V2 carga el export `./tui` del paquete automáticamente, así que la línea de
+stats, `/stats` y `/model` funcionan sin entrada en `tui.json` y sin el knob
+V1 `tui: "ensure"`. Las opciones usan la forma de objeto de V2:
+
+```json
+{
+  "plugins": [
+    {
+      "package": "@srnoob2570/opencode-ollama-cloud",
+      "options": { "pricing": "off" }
+    }
+  ]
+}
+```
+
+Qué cambia en V2:
+
+- **Catálogo y precios.** El artefacto se aplica mediante los transforms de
+  catálogo de V2: el proveedor `ollama-cloud` de models.dev se enriquece con
+  nombres, límites de contexto/salida, variantes de razonamiento y tarifas
+  oficiales del artefacto. Los modelos que el artefacto no lista siguen
+  disponibles pero sin tarifa (nuestra tarifa o nada — el mismo contrato que
+  V1). La identidad del proveedor es nuestra; el bloque de proveedor del
+  artefacto nunca se adopta.
+- **Stats.** La build beta probada (`0.0.0-beta-19425`) no despacha los hooks
+  HTTP de sesión documentados, así que TTFT/TPS se miden desde el stream de
+  eventos público de opencode (`session.step.*`) en lugar del cable. Siguen
+  siendo por LLM step y por sesión (subagentes, generación de título y
+  compactación excluidos), pero son reloj-de-evento, no reloj-de-socket. Los
+  archivos de handoff que lee la TUI no cambian.
+- **Auto-actualización** sigue siendo una función de V1: V2 maneja su propia
+  caché npm y ofrece `opencode2 plugin update`.
+- El knob V1 `tui` se ignora; `catalogUrl`, `timeoutMs`, `pricing`, `stats` y
+  `statsDebug` se comportan igual.
+
+Para una instalación local (dev) en V2, apunta `plugins` al directorio
+`plugin/` del repo (el módulo de entrada):
+
+```json
+{
+  "plugins": ["/path/to/opencode-ollama-cloud/plugin"]
+}
+```
+
+V2 probado con `0.0.0-beta-19425`; V1 con 1.18.19 y 1.18.27.
+
 ## Desarrollo
 
 Este repo ya no genera el catálogo: vive en [srnoob2570/ollama-cloud-catalog](https://github.com/srnoob2570/ollama-cloud-catalog) (Bun + TypeScript, compuertizado por hash, fail-loud).
