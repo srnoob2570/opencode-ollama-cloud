@@ -241,6 +241,12 @@ export interface StatsCollector {
       now: number;
     },
   ): void;
+  /**
+   * Direct route (opencode 2.x HTTP hooks): the caller already owns the
+   * session, provider, model and request kind, so the step joins the store
+   * without a pending/claim round-trip.
+   */
+  record(step: StepMeasurement): void;
   /** Wire route: correlate an assistant message with a pending step. */
   claim(input: {
     now: number;
@@ -293,6 +299,9 @@ export const createStatsCollector = (sessionID: string): StatsCollector => {
         deadline: input.now + PENDING_WINDOW_MS,
         sessionParentId: input.sessionParentId,
       });
+    },
+    record(step) {
+      remember(step);
     },
     claim(input) {
       // snapshot the candidate set first: it is what the instrumentation logs

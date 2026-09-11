@@ -2,20 +2,20 @@
 
 ## Project Responsibility
 
-An [opencode](https://opencode.ai) plugin (Bun + TypeScript, no bundler — the host loads the TS/TSX directly) that registers the **Ollama Cloud** provider with an always-current model list. The list is consumed as a static artifact (`catalog.json`) built upstream by [ollama-cloud-catalog](https://github.com/srnoob2570/ollama-cloud-catalog) (hash-gated GitHub Actions, models.dev-shape + `x_ollama` extension). A second, TUI-side plugin entry adds client-side streaming metrics (TTFT / tokens-per-second per LLM step), a live status line, `/stats`, `/model`, and a model card. Official per-model pricing ships embedded in the artifact's `cost` blocks and feeds opencode's cost counter.
+An [opencode](https://opencode.ai) plugin (Bun + TypeScript, no bundler — the host loads the TS/TSX directly) that registers the **Ollama Cloud** provider with an always-current model list. The list is consumed as a static artifact (`catalog.json`) built upstream by [ollama-cloud-catalog](https://github.com/srnoob2570/ollama-cloud-catalog) (hash-gated GitHub Actions, models.dev-shape + `x_ollama` extension). A second, TUI-side plugin entry adds client-side streaming metrics (TTFT / tokens-per-second per LLM step), a live status line, `/stats`, `/model`, and a model card. Official per-model pricing ships embedded in the artifact's `cost` blocks and feeds opencode's cost counter. Both entries are dual V1/V2: opencode 1.x calls `server()`/`tui()`, opencode 2.x reads `id` + `setup()`.
 
 ## System Entry Points
 
-- `plugin/index.ts` — server plugin entry (`main` / exports `.` and `./server`): hook-based registration of the provider (`config`), live model list (`provider.models`), and stats capture (`event` + fetch wrapper).
-- `plugin/tui.tsx` — TUI plugin entry (exports `./tui`): `/stats` and `/model` commands, live status-line slot, loaded by opencode's TUI host from `tui.json` as a separate module.
+- `plugin/index.ts` — dual server plugin entry (`main` / exports `.` and `./server`): V1 factory (`server()`) with hook-based provider registration (`config`), live model list (`provider.models`), and wire stats capture (`event` + fetch wrapper); V2 `setup()` (`v2-server.ts`) applies the artifact through catalog transforms and captures stats from the event stream.
+- `plugin/tui.tsx` — dual TUI plugin entry (exports `./tui`): V1 `/stats` and `/model` commands plus the live status-line slot (loaded by opencode 1.x from `tui.json` as a separate module); V2 `setup()` (`tui-v2.tsx`) registers the same UI through the V2 slot/keymap/dialog APIs, auto-loaded from the package's `./tui` export.
 - `package.json` — dependency manifest, dual entry points, `test`/`typecheck` scripts.
 - `tsconfig.json` — strict TS config (path-less, runtime TS loading by opencode).
 
 ## Repository Directory Map (Aggregated)
 
-| Directory | Responsibility Summary                                                                                                                                                                                                           | Detailed Map                  |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| `plugin/` | Plugin core: catalog mirror-race loader + validation adapter, model normalizer (ModelV2), streaming stats pipeline (wire capture → measurement → handoff persistence), self-update, TUI config patching, TUI display formatting. | [View Map](plugin/codemap.md) |
+| Directory | Responsibility Summary                                                                                                                                                                                                                                                          | Detailed Map                  |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `plugin/` | Plugin core: catalog mirror-race loader + validation adapter, V1 model normalizer (ModelV2) and V2 catalog transform adapter, V1 wire stats capture + V2 event-route capture, handoff persistence, self-update, TUI config patching, V1 and V2 TUI entries, display formatting. | [View Map](plugin/codemap.md) |
 
 ## Root Assets
 

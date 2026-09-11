@@ -5,8 +5,9 @@ import { join } from "node:path";
 import type { CatalogModel, PricingRate } from "./catalog.ts";
 // Helpers live outside the entry module: opencode's legacy plugin loader
 // calls EVERY exported function of ./index.ts as a plugin factory with
-// (PluginInput, options), so that module must export only the default
-// factory (see the note there).
+// (PluginInput, options), so that module must not export named functions
+// (see the note there). The default export is the dual V1/V2 object: V1
+// calls `.server(...)`, V2 reads `.id`/`.setup`.
 import { createStatsDebugSink, statsDebugSinkFor } from "./debug-sink.ts";
 import { toModelV2 } from "./models.ts";
 import opencodeOllamaCloud from "./index.ts";
@@ -109,11 +110,20 @@ describe("toModelV2 pricing", () => {
   });
 });
 
+describe("dual V1/V2 entry", () => {
+  test("default export carries the V2 definition and the V1 server factory", () => {
+    expect(typeof opencodeOllamaCloud.server).toBe("function");
+    expect(typeof opencodeOllamaCloud.setup).toBe("function");
+    expect(typeof opencodeOllamaCloud.id).toBe("string");
+    expect(opencodeOllamaCloud.id.length).toBeGreaterThan(0);
+  });
+});
+
 // Stats knob (ticket 08): default ON, opt-out. In "off" the plugin must be
 // behavior-identical to pre-stats: no provider options.fetch, no event hook.
 describe("stats knob", () => {
   const make = async (opts: Record<string, unknown>) => {
-    const plugin = await opencodeOllamaCloud({} as never, opts as never);
+    const plugin = await opencodeOllamaCloud.server({} as never, opts as never);
     const cfg = { provider: {} as Record<string, Record<string, unknown>> };
     await (plugin as any).config(cfg);
     return { plugin, cfg };
@@ -147,7 +157,7 @@ describe("statsDebug knob", () => {
   test("truthy → sink; el knob viaja al capture sin romper la creación del plugin", async () => {
     expect(typeof statsDebugSinkFor(true)).toBe("function");
     expect(typeof statsDebugSinkFor(1)).toBe("function");
-    const plugin = await opencodeOllamaCloud(
+    const plugin = await opencodeOllamaCloud.server(
       {} as never,
       {
         statsDebug: true,

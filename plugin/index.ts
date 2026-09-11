@@ -12,8 +12,9 @@ import { toModelV2, zeroCost } from "./models.ts";
 import { ensureKnob, ensureTuiPlugin } from "./ensure-tui.ts";
 import { runSelfUpdate } from "./self-update.ts";
 import { pricingKnob } from "./tui-display.ts";
+import { createV2ServerPlugin } from "./v2-server.ts";
 
-// NOTE: export ONLY the plugin factory from this entry module. opencode's
+// NOTE: no named function exports from this entry module. opencode's V1
 // legacy plugin path (packages/opencode/src/plugin/index.ts, getLegacyPlugins)
 // calls EVERY exported function of a plugin module as a plugin factory with
 // (PluginInput, options) whenever the default export is a function. Any extra
@@ -21,7 +22,9 @@ import { pricingKnob } from "./tui-display.ts";
 // received the PluginInput object as `dir` and threw inside node:path join,
 // killing the plugin before `default` ever ran) or throws after registration
 // (the old toModelV2 error). toModelV2/zeroCost live in ./models.ts and the
-// statsDebug sink in ./debug-sink.ts — import them from there.
+// statsDebug sink in ./debug-sink.ts — import them from there. The default
+// export below is an OBJECT (dual V1/V2 entry, see the docs "Support V1"), so
+// nothing is called as a factory by the legacy path either.
 
 // Pricing knob (opt-out): default on — the rate is the OFFICIAL Ollama Cloud
 // tariff (the public rate card), so only `off` turns it off. Legacy configs
@@ -127,4 +130,10 @@ const opencodeOllamaCloud: Plugin = async (input, options) => {
   };
 };
 
-export default opencodeOllamaCloud;
+// Dual entry (opencode 2.x docs, "Support V1"): V2 reads the default export's
+// `id` and `setup()`, V1 calls `server()`. The V1 factory above is untouched;
+// each host stays on its own API.
+export default {
+  ...createV2ServerPlugin(),
+  server: opencodeOllamaCloud,
+};

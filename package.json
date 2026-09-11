@@ -1,6 +1,6 @@
 {
   "name": "@srnoob2570/opencode-ollama-cloud",
-  "version": "0.1.10",
+  "version": "0.2.0",
   "description": "opencode plugin: live Ollama Cloud model catalog, served from srnoob2570/ollama-cloud-catalog",
   "type": "module",
   "license": "MIT",
@@ -23,21 +23,31 @@
   },
   "files": [
     "plugin/catalog.ts",
+    "plugin/capture.ts",
     "plugin/debug-sink.ts",
+    "plugin/ensure-tui.ts",
+    "plugin/handoff.ts",
     "plugin/index.ts",
     "plugin/models.ts",
+    "plugin/self-update.ts",
     "plugin/stats.ts",
-    "plugin/capture.ts",
-    "plugin/handoff.ts",
     "plugin/tui-display.ts",
-    "plugin/tui.tsx"
+    "plugin/tui-v2.tsx",
+    "plugin/tui.tsx",
+    "plugin/v2-capture.ts",
+    "plugin/v2-catalog.ts",
+    "plugin/v2-server.ts",
+    "plugin/v2-types.ts"
   ],
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.18.0"
+    "@opencode-ai/plugin": ">=1.18.0",
+    "@opentui/core": ">=0.5.8",
+    "@opentui/solid": ">=0.5.8",
+    "solid-js": ">=1.9.0"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "1.18.7",

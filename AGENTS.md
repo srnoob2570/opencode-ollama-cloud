@@ -25,10 +25,11 @@ For deep work on a specific folder, also read that folder's `codemap.md`.
 
 ## Architecture facts
 
-- Dual plugin entries, loaded by the opencode host WITHOUT bundling (TS/TSX straight from the package): server `plugin/index.ts` (exports `.`/`./server`) and TUI `plugin/tui.tsx` (exports `./tui`, registered in `~/.config/opencode/tui.json`). They run in separate processes and share state ONLY through on-disk files: `~/.cache/opencode-ollama-cloud/` (handoff `stats-<sessionID>.json`, `update.json`, catalog cache).
+- Dual plugin entries, loaded by the opencode host WITHOUT bundling (TS/TSX straight from the package): server `plugin/index.ts` (exports `.`/`./server`) and TUI `plugin/tui.tsx` (exports `./tui`; V1 registers it in `~/.config/opencode/tui.json`, V2 auto-loads it). Both entries are dual V1/V2: V1 calls `server()`/`tui()`, V2 reads the default object's `id` + `setup()`. They run in separate processes and share state ONLY through on-disk files: `~/.cache/opencode-ollama-cloud/` (handoff `stats-<sessionID>.json`, `update.json`, catalog cache).
+- V2 server path: `v2-server.ts` applies the artifact through `ctx.catalog.transform` (`v2-catalog.ts`, pure) and captures stats from the public event stream (`v2-capture.ts`) because the tested beta (`0.0.0-beta-19425`) does not dispatch session HTTP hooks. V2 TUI path: `tui-v2.tsx` (slots/keymap/dialogs), same display helpers and handoff files as V1. V2 API types are local/structural (`v2-types.ts`) — do not add `@opencode/plugin` as a dependency.
 - `package.json` `files` is an explicit allowlist — a new source file must be added there or it will not ship on npm.
 - The model catalog is NOT built here. This repo consumes `catalog.json` from upstream `srnoob2570/ollama-cloud-catalog` (models.dev shape + `x_ollama` extension; pricing embedded per-model in `cost`; fetched jsDelivr → raw GitHub → local cache → models.dev zero-cost fallback). Do not reintroduce local catalog scripts, schemas, or ajv — they were removed on purpose.
-- Plugin knobs: `catalogUrl`, `timeoutMs`, `pricing` `"on"|"off"` (legacy `"reference"` == `"on"`), `stats`, `tui: "ensure"`. `index.ts` default-exports a single factory; opencode's legacy loader calls every exported function as a factory.
+- Plugin knobs: `catalogUrl`, `timeoutMs`, `pricing` `"on"|"off"` (legacy `"reference"` == `"on"`), `stats`, `tui: "ensure"` (V1 only), `statsDebug`. The default export is a single object; V1 uses its `server` function, V2 its `id`+`setup`.
 
 ## LSP vs reality
 

@@ -155,6 +155,67 @@ The model card's quantization is the value Ollama declares for the model it serv
 
 Credit where it's due: the streaming-stats idea was proposed by GitHub user [@adilfaisal01](https://github.com/adilfaisal01).
 
+## opencode 2.x support
+
+The same package supports opencode 1.x and 2.x (the V2 beta). Both entries are
+dual: V1 calls `server()` / `tui()`, V2 reads the default object's `id` +
+`setup()`. V1 code paths are untouched.
+
+Install for V2 (the V2 config key is `plugins`; the V2 CLI can also add it with
+`opencode2 plugin add`):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["@srnoob2570/opencode-ollama-cloud"]
+}
+```
+
+V2 loads the package's `./tui` export automatically, so the stats line,
+`/stats` and `/model` work without a `tui.json` entry and without the V1
+`tui: "ensure"` knob. Options use V2's object form:
+
+```json
+{
+  "plugins": [
+    {
+      "package": "@srnoob2570/opencode-ollama-cloud",
+      "options": { "pricing": "off" }
+    }
+  ]
+}
+```
+
+What changes in V2:
+
+- **Catalog and pricing.** The artifact is applied through V2's catalog
+  transforms: the models.dev `ollama-cloud` provider is enriched with the
+  artifact's names, context/output limits, reasoning variants and official
+  rates. Models the artifact does not list stay available but rateless (our
+  rate or nothing — the same contract as V1). Provider identity stays ours;
+  the artifact's provider block is never adopted.
+- **Stats.** The beta build tested (`0.0.0-beta-19425`) does not dispatch the
+  documented session HTTP hooks, so TTFT/TPS are measured from opencode's
+  public event stream (`session.step.*`) instead of the wire. They are still
+  per LLM step and session-scoped (subagents, title generation and compaction
+  excluded), but they are event-clock rather than socket-clock. The handoff
+  files the TUI reads are unchanged.
+- **Self-update** stays a V1 feature: V2 owns its npm cache and ships
+  `opencode2 plugin update`.
+- The V1-only `tui` knob is ignored; `catalogUrl`, `timeoutMs`, `pricing`,
+  `stats` and `statsDebug` behave the same.
+
+For a local (dev) V2 install, point `plugins` at the repo's `plugin/`
+directory (the entry module):
+
+```json
+{
+  "plugins": ["/path/to/opencode-ollama-cloud/plugin"]
+}
+```
+
+V2 tested with `0.0.0-beta-19425`; V1 with 1.18.19 and 1.18.27.
+
 ## Development
 
 The catalog and its updater live in [srnoob2570/ollama-cloud-catalog](https://github.com/srnoob2570/ollama-cloud-catalog). This repo is only the consumer:

@@ -3,6 +3,23 @@
 Entries here follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [SemVer](https://semver.org/spec/v2.0.0.html).
 Each version also lives on the [releases page](https://github.com/srnoob2570/opencode-ollama-cloud/releases).
 
+## [0.2.0] - 2026-09-11
+
+### Added
+
+- opencode 2.x (V2 beta) support from the same package and entries. The server and TUI entries are dual: V1 calls `server()` / `tui()`, V2 reads the default object's `id` + `setup()`. In V2 the catalog is applied through catalog transforms (models.dev's `ollama-cloud` provider is enriched with the artifact's names, limits, reasoning variants and official rates; models outside the artifact stay available but rateless), the TUI loads automatically from the package's `./tui` export (no `tui.json` entry and no `tui: "ensure"` knob needed), and options use V2's `{ "package": ..., "options": ... }` form. The TUI entries carry the `@opentui/solid` JSX import pragma and `package.json` declares the OpenTUI/Solid peers (V2 loads external packages without rewriting JSX; V1 keeps its own runtime).
+- V2 stats capture through opencode's public event stream (`session.step.*`). The beta build tested (`0.0.0-beta-19425`) does not dispatch the documented session HTTP hooks, so TTFT/TPS are event-clock rather than socket-clock; the handoff file contract and the TUI behavior are unchanged. Per-location filtering keeps each plugin instance from recording another location's sessions.
+
+### Fixed
+
+- The npm tarball was missing `plugin/ensure-tui.ts` and `plugin/self-update.ts`, both imported by `plugin/index.ts`. The 0.1.10 package failed to load (`Cannot find module '...ensure-tui.ts'`); the `files` allowlist now includes them plus the new V2 modules.
+
+### Changed
+
+- README and README.es document V2 install, behavior and the differences from V1. V2 tested with `0.0.0-beta-19425`; V1 with 1.18.19 and 1.18.27.
+
+**Full changelog:** https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.10...v0.2.0
+
 ## [0.1.10] - 2026-09-05
 
 ### Changed

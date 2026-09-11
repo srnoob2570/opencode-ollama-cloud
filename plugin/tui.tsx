@@ -1,3 +1,4 @@
+/** @jsxImportSource @opentui/solid */
 // TUI plugin module of the stats effort (tickets 04/05/07). opencode loads
 // this through its own loader, which transpiles plugin .tsx at runtime and
 // rewrites solid-js/@opentui imports to shared runtime modules (verified in
@@ -29,6 +30,7 @@ import { readUpdateRecord } from "./self-update.ts";
 import { loadCatalog, type Catalog } from "./catalog.ts";
 import type { SessionSummary } from "./stats.ts";
 import { appendBoundedLog } from "./debug-sink.ts";
+import { createV2TuiPlugin } from "./tui-v2.tsx";
 import { join } from "node:path";
 
 interface TuiLike {
@@ -275,7 +277,10 @@ const showModel = async (api: TuiLike, pricingOn: boolean): Promise<void> => {
 };
 
 export default {
-  id: "opencode-ollama-cloud-tui",
+  // V2 host entry (opencode 2.x): the spread provides `id` and `setup(ctx)`
+  // from ./tui-v2.tsx; V1 keeps calling `tui(api, options)` below. The id
+  // must stay "opencode-ollama-cloud-tui" for both hosts.
+  ...createV2TuiPlugin(),
   async tui(
     api: TuiLike,
     options?: {
