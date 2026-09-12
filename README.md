@@ -1,7 +1,6 @@
 # @srnoob2570/opencode-ollama-cloud
 
 [![npm](https://img.shields.io/npm/v/@srnoob2570/opencode-ollama-cloud)](https://www.npmjs.com/package/@srnoob2570/opencode-ollama-cloud)
-[![Catalog update](https://github.com/srnoob2570/ollama-cloud-catalog/actions/workflows/update-catalog.yml/badge.svg)](https://github.com/srnoob2570/ollama-cloud-catalog/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [Leer en español →](README.es.md)
