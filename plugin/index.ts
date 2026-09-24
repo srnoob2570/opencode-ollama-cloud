@@ -12,16 +12,21 @@ import { toModelV2, zeroCost } from "./models.ts";
 import { ensureKnob, ensureTuiPlugin } from "./ensure-tui.ts";
 import { runSelfUpdate } from "./self-update.ts";
 import { pricingKnob } from "./tui-display.ts";
+import { setupV2 } from "./server-v2.ts";
+import { logDeprecatedV1 } from "./version.ts";
 
-// NOTE: export ONLY the plugin factory from this entry module. opencode's
-// legacy plugin path (packages/opencode/src/plugin/index.ts, getLegacyPlugins)
-// calls EVERY exported function of a plugin module as a plugin factory with
-// (PluginInput, options) whenever the default export is a function. Any extra
-// export here either crashes the whole load (createStatsDebugSink once
-// received the PluginInput object as `dir` and threw inside node:path join,
-// killing the plugin before `default` ever ran) or throws after registration
-// (the old toModelV2 error). toModelV2/zeroCost live in ./models.ts and the
-// statsDebug sink in ./debug-sink.ts — import them from there.
+// NOTE: export ONLY the dual entry shape from this module. opencode's legacy
+// plugin path (packages/opencode/src/plugin/index.ts, getLegacyPlugins) calls
+// EVERY exported function of a plugin module as a plugin factory with
+// (PluginInput, options) whenever the default export is a function — the dual
+// object default below is its PluginModule shape, so v1 reads `.server` and
+// v2 validates `id + setup`. Either way, an extra exported function here is
+// still fair game as a factory on v1: one once crashed the whole load
+// (createStatsDebugSink received the PluginInput object as `dir` and threw
+// inside node:path join, killing the plugin before `default` ever ran) and
+// another threw after registration (the old toModelV2 error).
+// toModelV2/zeroCost live in ./models.ts and the statsDebug sink in
+// ./debug-sink.ts — import them from there.
 
 // Pricing knob (opt-out): default on — the rate is the OFFICIAL Ollama Cloud
 // tariff (the public rate card), so only `off` turns it off. Legacy configs
@@ -38,6 +43,11 @@ const opencodeOllamaCloud: Plugin = async (input, options) => {
     timeoutMs:
       typeof options?.timeoutMs === "number" ? options.timeoutMs : undefined,
   };
+
+  // V1 deprecation notice (owner decision: silent — one line in the plugin's
+  // own debug log, never on screen). This factory only runs on opencode 1.x
+  // hosts, so no version detection is needed — presence here means v1.
+  logDeprecatedV1(options?.deprecation);
 
   const { id: _id, ...providerConfig } = PROVIDER_CONFIG;
   // Stats capture (spec Pieza 1): wire wrapper for ollama-cloud + claim
@@ -67,7 +77,9 @@ const opencodeOllamaCloud: Plugin = async (input, options) => {
 
   return {
     ...(capture
-      ? { event: ({ event }: { event: unknown }) => capture.handleEvent(event) }
+      ? {
+          event: ({ event }: { event: unknown }) => capture.handleEvent(event),
+        }
       : {}),
     config: async (cfg) => {
       cfg.provider ??= {};
@@ -127,4 +139,13 @@ const opencodeOllamaCloud: Plugin = async (input, options) => {
   };
 };
 
-export default opencodeOllamaCloud;
+// Dual-host entry (docs/research/soporte-v1-v2.md): opencode v1 reads `.server`
+// from an object default (its PluginModule shape — same as @opencode-ai/plugin
+// documents and as @tarquinen/opencode-dcp ships), while v2 validates
+// `id + setup` and runs setup(ctx) with the v2 PluginContext, ignoring
+// `.server`. One module, both hosts; which code runs IS the generation.
+export default {
+  id: "opencode-ollama-cloud",
+  setup: setupV2,
+  server: opencodeOllamaCloud,
+};

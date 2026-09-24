@@ -50,6 +50,25 @@ flowchart LR
 2. Local cache at `~/.cache/opencode-ollama-cloud/catalog.json`
 3. models.dev passthrough (the models opencode already ships)
 
+## opencode V1 / V2 support
+
+The plugin ships a **dual entry** that both host generations load natively — one module, no version detection:
+
+- **opencode 1.x (V1)**: runs the classic `server` factory (`config`/`provider`/`event` hooks), registers the provider and returns the catalog models, wires the stats capture and (opt-in) the TUI auto-registration. **V1 support is deprecated**: on a V1 host the plugin writes one silent line to `~/.cache/opencode-ollama-cloud/deprecation.log` per boot. Silence it with the `deprecation: "off"` option.
+- **opencode 2.x (V2)**: validates the module's `id + setup` and runs `setup(ctx)` against the v2 plugin context, injecting the catalog (with official pricing) through `ctx.provider.transform` → `draft.models.set`. The v2 plugin registry is managed with `opencode plugin add/check/update/remove`.
+
+Per-host differences (verified against opencode 2.0.15 — details in `docs/research/soporte-v1-v2.md`):
+
+| Feature                                         | V1 (1.18.x)        | V2 (2.0.x)                                                      |
+| ----------------------------------------------- | ------------------ | --------------------------------------------------------------- |
+| Catalog + official pricing                      | ✅ `provider` hook | ✅ `provider.transform`                                         |
+| Stats capture (TTFT/TPS line, `/stats`)         | ✅                 | ❌ no plugin-reachable fetch seam or event bus in 2.0.15        |
+| TUI module (stats line, `/stats`, update badge) | ✅ via `tui.json`  | ❌ 2.0.x exposes no third-party TUI plugin loading path         |
+| Self-update (eviction + toast/badge)            | ✅                 | ❌ the host's own `opencode plugin update` owns package updates |
+| Deprecation notice                              | silent log line    | n/a (V2 is the current generation)                              |
+
+Registering a `provider.transform` **takes ownership** of the provider's model list: once the plugin's transform is registered, opencode stops merging models.dev's `ollama-cloud` entries. The plugin only registers the transform after the catalog loads with at least one model — on catalog failure the models.dev fallback stays alive.
+
 ## Manual install
 
 Prefer editing the config yourself? Add the plugin to `~/.config/opencode/opencode.json`:
@@ -85,7 +104,8 @@ Prefer editing the config yourself? Add the plugin to `~/.config/opencode/openco
 - `catalogUrl`: alternative catalog URL (tried first).
 - `timeoutMs`: per-fetch timeout (default `5000`).
 - `pricing`: `"on"` (default) or `"off"`. Controls whether opencode's session cost counter shows the official Ollama Cloud rate. `pricing: "reference"` (the old opt-in value) still works and means `"on"`.
-- `tui`: `"ensure"` (opt-in, default off). The server entry registers the TUI entry itself by patching the tui.json opencode will read (`$OPENCODE_TUI_CONFIG` when set, else the global one). Idempotent, comment-preserving, effective on the next TUI launch. Dev installs (repo paths) never patch anything.
+- `tui`: `"ensure"` (opt-in, default off). The server entry registers the TUI entry itself by patching the tui.json opencode will read (`$OPENCODE_TUI_CONFIG` when set, else the global one). Idempotent, comment-preserving, effective on the next TUI launch. Dev installs (repo paths) never patch anything. V1 only — opencode 2.x has no TUI plugin loading path, so under V2 this knob has nothing to do.
+- `deprecation`: `"on"` (default) or `"off"`. On a V1 host, writes the silent deprecation notice to `~/.cache/opencode-ollama-cloud/deprecation.log`. `"off"` silences it. No effect under V2.
 
 ```json
 {

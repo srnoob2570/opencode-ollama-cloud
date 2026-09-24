@@ -22,6 +22,7 @@ import {
   type HandoffFile,
 } from "./handoff.ts";
 import { readUpdateRecord } from "./self-update.ts";
+import { logDeprecatedV1 } from "./version.ts";
 import type { SessionSummary } from "./stats.ts";
 import { appendBoundedLog } from "./debug-sink.ts";
 import { join } from "node:path";
@@ -196,12 +197,17 @@ export default {
     api: TuiLike,
     options?: {
       stats?: string;
+      deprecation?: unknown;
     },
   ) {
     debug(
       "tui module entry, version",
       String((api as { app?: { version?: string } }).app?.version ?? "?"),
     );
+    // This module only ever loads on opencode 1.x hosts (v2.0.x has no
+    // reachable third-party TUI plugin loading path — research doc §TUI), so
+    // like the server factory, presence here means v1: one silent log line.
+    logDeprecatedV1(options?.deprecation);
     try {
       // knob (ticket 08): opt-out supported from BOTH module entries
       if (options?.stats === "off") {

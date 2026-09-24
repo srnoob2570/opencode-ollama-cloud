@@ -2,10 +2,13 @@ node_modules/
 .DS_Store
 *.log
 # wayfinding maps y research local del repo (no se publican)
+# (anclado a la raíz: docs/research/ SÍ se publica)
 wayfinder/
-research/
+/research/
 .scratch/
 # Bun es el gestor del repo; un package-lock.json npm local nunca debe colarse
 package-lock.json
-docs/specs
-docs/brainstorm-2026-08-30.md
+
+**/docs
+**/.omc
+**/.serena

@@ -24,13 +24,17 @@
   "files": [
     "plugin/catalog.ts",
     "plugin/debug-sink.ts",
+    "plugin/ensure-tui.ts",
     "plugin/index.ts",
     "plugin/models.ts",
+    "plugin/self-update.ts",
+    "plugin/server-v2.ts",
     "plugin/stats.ts",
     "plugin/capture.ts",
     "plugin/handoff.ts",
     "plugin/tui-display.ts",
-    "plugin/tui.tsx"
+    "plugin/tui.tsx",
+    "plugin/version.ts"
   ],
   "scripts": {
     "test": "bun test",
@@ -40,8 +44,8 @@
     "@opencode-ai/plugin": ">=1.18.0"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "1.18.7",
-    "@opencode-ai/sdk": "1.18.7",
+    "@opencode-ai/plugin": "1.18.32",
+    "@opencode-ai/sdk": "1.18.32",
     "@types/bun": "^1.4.0",
     "@types/node": "^24.0.0",
     "typescript": "5.9.3"

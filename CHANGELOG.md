@@ -3,6 +3,25 @@
 Entries here follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [SemVer](https://semver.org/spec/v2.0.0.html).
 Each version also lives on the [releases page](https://github.com/srnoob2570/opencode-ollama-cloud/releases).
 
+## [Unreleased]
+
+### Added
+
+- Support for **opencode V2** (2.x). The entry module now exports the dual shape `{id, setup, server}`: opencode 1.x reads `.server` (the classic factory, unchanged) and opencode 2.x validates `id + setup` and runs `setup(ctx)` against the v2 plugin context. Under V2 the plugin injects the catalog with official pricing through `ctx.provider.transform` → `draft.models.set` (verified end-to-end against opencode 2.0.15: the 20 catalog models appear and generation works). The transform is only registered after the catalog loads — on failure, models.dev's `ollama-cloud` fallback stays alive. Full findings in `docs/research/soporte-v1-v2.md`.
+- `deprecation` plugin option (`"on"` default, `"off"` silences). See Deprecated below.
+- Support for **opencode V2** (2.x). The entry module now exports the dual shape `{id, setup, server}`: opencode 1.x reads `.server` (the classic factory, unchanged) and opencode 2.x validates `id + setup` and runs `setup(ctx)` against the v2 plugin context. Under V2 the plugin injects the catalog with official pricing through `ctx.provider.transform` → `draft.models.set` (verified end-to-end against opencode 2.0.15: the 20 catalog models appear and generation works). The transform is only registered after the catalog loads — on failure, models.dev's `ollama-cloud` fallback stays alive. Full findings in `docs/research/soporte-v1-v2.md`
+- `deprecation` plugin option (`"on"` default, `"off"` silences). See Deprecated below
+
+### Deprecated
+
+- **opencode V1 support.** The V1 code path (server factory, TUI module, stats capture, `tui: "ensure"`, self-update) still works exactly as before, but on a V1 host the plugin now writes one silent notice per boot to `~/.cache/opencode-ollama-cloud/deprecation.log`. Nothing appears on screen; `deprecation: "off"` silences it. V1-only features that cannot exist under 2.0.x (stats capture needs a fetch seam and event bus that 2.0.15 does not expose to plugins; the TUI module has no loading path for third-party plugins in 2.0.x; self-update is the host's `opencode plugin update`) are documented as such in the README support matrix.
+- **opencode V1 support.** The V1 code path (server factory, TUI module, stats capture, `tui: "ensure"`, self-update) still works exactly as before, but on a V1 host the plugin now writes one silent notice per boot to `~/.cache/opencode-ollama-cloud/deprecation.log`. Nothing appears on screen; `deprecation: "off"` silences it. V1-only features that cannot exist under 2.0.x (stats capture needs a fetch seam and event bus that 2.0.15 does not expose to plugins; the TUI module has no loading path for third-party plugins in 2.0.x; self-update is the host's `opencode plugin update`) are documented as such in the README support matrix
+
+### Fixed
+
+- `package.json` `files` omitted `ensure-tui.ts` and `self-update.ts`, which the entry imports. opencode 1.x tolerated the omission, but 2.x's strict module resolution fails the whole plugin load with `Cannot find module './ensure-tui.ts'` — any 0.1.x install under opencode V2 was dead on arrival. The tarball now ships the complete `plugin/` source.
+- `package.json` `files` omitted `ensure-tui.ts` and `self-update.ts`, which the entry imports. opencode 1.x tolerated the omission, but 2.x's strict module resolution fails the whole plugin load with `Cannot find module './ensure-tui.ts'` — any 0.1.x install under opencode V2 was dead on arrival. The tarball now ships the complete `plugin/` source
+
 ## [0.1.11] - 2026-09-11
 
 ### Removed

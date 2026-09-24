@@ -8,8 +8,90 @@ import type { CatalogModel, PricingRate } from "./catalog.ts";
 // (PluginInput, options), so that module must export only the default
 // factory (see the note there).
 import { createStatsDebugSink, statsDebugSinkFor } from "./debug-sink.ts";
-import { toModelV2 } from "./models.ts";
+import { toModelV2, toModelV2Info } from "./models.ts";
 import opencodeOllamaCloud from "./index.ts";
+
+// Dual entry (docs/research/soporte-v1-v2.md): the default export is the object
+// BOTH hosts consume — v1 reads `.server`, v2 validates `id + setup`.
+describe("entrada dual v1/v2", () => {
+  test("el default expone {id, setup, server} — el contrato de ambos hosts", () => {
+    expect(opencodeOllamaCloud.id).toBe("opencode-ollama-cloud");
+    expect(typeof opencodeOllamaCloud.setup).toBe("function");
+    expect(typeof opencodeOllamaCloud.server).toBe("function");
+  });
+
+  test("setup v2 sin contexto (host roto) se degrada en silencio", async () => {
+    await expect(opencodeOllamaCloud.setup(undefined)).resolves.toBeUndefined();
+    await expect(
+      opencodeOllamaCloud.setup({} as never),
+    ).resolves.toBeUndefined();
+  });
+});
+
+// toModelV2Info: the opencode 2.x runtime catalog record (verified against
+// 2.0.15 — cost is a tier ARRAY, release date is epoch MS, effort variants
+// are an array, provider package is the runtime's openai-compatible one).
+describe("toModelV2Info (registro v2)", () => {
+  test("campos base del runtime v2", () => {
+    const r = toModelV2Info(GLM53);
+    expect(r.id).toBe("glm-5.3");
+    expect(r.modelID).toBe("glm-5.3");
+    expect(r.providerID).toBe("ollama-cloud");
+    expect(r.package).toBe("@opencode/ai/providers/openai-compatible");
+    expect(r.settings).toEqual({ provider: "ollama-cloud" });
+    expect(r.status).toBe("active");
+    expect(r.enabled).toBe(true);
+    expect(r.limit).toEqual({ context: 1024 * 1024, output: 131072 });
+  });
+
+  test("cost es un array de tiers con el contrato de precios de siempre", () => {
+    const priced = { ...GLM53, cost: OFFICIAL };
+    expect(toModelV2Info(priced).cost).toEqual([
+      { input: 0.44, output: 1.32, cache: { read: 0.014, write: 0 } },
+    ]);
+    expect(toModelV2Info(priced, "off").cost).toEqual([
+      { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    ]);
+    expect(toModelV2Info(GLM53).cost).toEqual([
+      { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    ]);
+  });
+
+  test("releaseDate ISO → time.released en ms; fecha basura omite el bloque", () => {
+    expect(toModelV2Info(GLM53).time).toEqual({
+      released: Date.parse("2026-08-14"),
+    });
+    expect(
+      toModelV2Info({ ...GLM53, releaseDate: "nonsense" }).time,
+    ).toBeUndefined();
+  });
+
+  test("thinking → compatibility.reasoning + variants como array de esfuerzos", () => {
+    const r = toModelV2Info(GLM53);
+    expect(r.compatibility).toEqual({ reasoningField: "reasoning" });
+    expect(r.variants).toEqual([
+      { id: "low", settings: { reasoningEffort: "low" } },
+      { id: "high", settings: { reasoningEffort: "high" } },
+      { id: "max", settings: { reasoningEffort: "max" } },
+    ]);
+    const plain = toModelV2Info({
+      ...GLM53,
+      reasoningOptions: [],
+      capabilities: { tools: true, thinking: false, vision: false },
+    });
+    expect(plain.compatibility).toBeUndefined();
+    expect(plain.variants).toBeUndefined();
+  });
+
+  test("vision amplía capabilities.input", () => {
+    const vision = toModelV2Info({
+      ...GLM53,
+      capabilities: { tools: true, thinking: false, vision: true },
+    });
+    expect(vision.capabilities.input).toEqual(["text", "image"]);
+    expect(toModelV2Info(GLM53).capabilities.input).toEqual(["text"]);
+  });
+});
 
 // Fixture mirrors the live glm-5.3 catalog entry (2026-08), normalized by
 // the loader: glm-5.3 advertises thinking tiers, glm-5.1 thinking has no
@@ -113,7 +195,7 @@ describe("toModelV2 pricing", () => {
 // behavior-identical to pre-stats: no provider options.fetch, no event hook.
 describe("stats knob", () => {
   const make = async (opts: Record<string, unknown>) => {
-    const plugin = await opencodeOllamaCloud({} as never, opts as never);
+    const plugin = await opencodeOllamaCloud.server({} as never, opts as never);
     const cfg = { provider: {} as Record<string, Record<string, unknown>> };
     await (plugin as any).config(cfg);
     return { plugin, cfg };
@@ -147,7 +229,7 @@ describe("statsDebug knob", () => {
   test("truthy → sink; el knob viaja al capture sin romper la creación del plugin", async () => {
     expect(typeof statsDebugSinkFor(true)).toBe("function");
     expect(typeof statsDebugSinkFor(1)).toBe("function");
-    const plugin = await opencodeOllamaCloud(
+    const plugin = await opencodeOllamaCloud.server(
       {} as never,
       {
         statsDebug: true,
