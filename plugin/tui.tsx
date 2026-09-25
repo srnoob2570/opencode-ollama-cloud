@@ -1,8 +1,16 @@
-// TUI plugin module of the stats effort (tickets 04/05/07). opencode loads
-// this through its own loader, which transpiles plugin .tsx at runtime and
-// rewrites solid-js/@opentui imports to shared runtime modules (verified in
-// packages/opencode/src/plugin/tui/runtime.ts) — so this file needs no local
-// build deps, only that opencode >= 1.18 is running it.
+// TUI plugin module of the stats effort (tickets 04/05/07). One source, two
+// hosts:
+//   - V1 (opencode 1.x): the default `tui(api, options)` factory. opencode's
+//     own loader transpiles this .tsx at runtime and rewrites solid-js /
+//     @opentui specifiers to shared runtime modules (packages/opencode/src/
+//     plugin/tui/runtime.ts) — no local build needed.
+//   - V2 (opencode 2.x): the default `setup(ctx)` factory. The V2 host loads
+//     `exports["./tui"]` from node_modules, where its Solid JSX transform does
+//     NOT run (its onLoad filter excludes node_modules) — raw JSX would fall
+//     back to Bun's React runtime and fail with "Cannot find package 'react'".
+//     So the shipped TUI entry is the precompiled `plugin/tui.js` (built by
+//     `bun run build:tui`), whose JSX imports @opentui/solid/jsx-runtime — a
+//     shared runtime module the host DOES rewrite in node_modules files.
 //
 // Silent degradation contract: every step is feature-detected; if the
 // undocumented TUI API moved, this module logs once and retires — the server
@@ -191,8 +199,248 @@ const refreshStatsDialog = async (api: TuiLike): Promise<void> => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// V2 TUI entry (opencode 2.x): same stats UI, host API `setup(ctx)`. The V2
+// contract is `{ id, setup }` (the module's `tui` member is ignored there);
+// `slot({ append, render })` registers the live line and `keymap.layer`
+// registers the /stats palette command. Typed structurally: the published
+// @opencode-ai/plugin typings do not cover the V2 TUI context.
+// ---------------------------------------------------------------------------
+interface TuiV2Theme {
+  textMuted?: string;
+  text?: string | { muted?: string };
+}
+interface TuiV2Context {
+  options?: { stats?: string; deprecation?: unknown };
+  app?: { version?: string };
+  theme?: TuiV2Theme;
+  keymap?: { layer?: (factory: () => unknown) => unknown };
+  ui?: {
+    slot?: (claim: {
+      append?: string;
+      render: (props?: { session_id?: string }) => unknown;
+    }) => unknown;
+    dialog?: {
+      show?: (render: () => unknown, onClose?: () => void) => void;
+      clear?: () => void;
+      alert?: (opts: { title: string; message: string }) => Promise<unknown>;
+    };
+    router?: { current?: () => unknown };
+  };
+}
+
+// V2 theme tokens: the V1 typings name the flat key `textMuted`; newer hosts
+// expose `text.muted`. Support both, never guess a colour.
+const mutedFg = (theme: TuiV2Theme | undefined): string | undefined => {
+  if (typeof theme?.textMuted === "string") return theme.textMuted;
+  const nested = (theme?.text as { muted?: unknown } | undefined)?.muted;
+  return typeof nested === "string" ? nested : undefined;
+};
+
+function setupV2Tui(ctx: TuiV2Context): (() => void) | undefined {
+  debug("v2 setup entry, version", String(ctx?.app?.version ?? "?"));
+  try {
+    // knob (ticket 08): opt-out supported from BOTH module entries
+    if (ctx?.options?.stats === "off") {
+      debug("stats off — retiring before any registration");
+      return;
+    }
+    const slot = ctx?.ui?.slot;
+    if (typeof slot !== "function") {
+      debug("v2 ui.slot missing; stats UI retires silently");
+      return;
+    }
+    const routeCurrent = (): unknown => ctx?.ui?.router?.current?.();
+
+    const [line, setLine] = createSignal<string>(formatLiveLine(null));
+    const [badge, setBadge] = createSignal<string>("");
+    const refreshBadge = async () => {
+      try {
+        const record = await readUpdateRecord();
+        setBadge(record ? `↑ ${record.latest}` : "");
+      } catch {
+        /* the badge is decoration, never a failure */
+      }
+    };
+    void refreshBadge();
+
+    let lastLine: string | null = null;
+    const refresh = async (sessionID?: string) => {
+      try {
+        // props win; the route accessor covers sessions created after mount
+        const sid =
+          sessionID ?? resolveSessionID(undefined, { current: routeCurrent() });
+        if (sid) activeSessionID = sid;
+        const file = await sessionFile(sid);
+        const next = formatLiveLine(file?.summary ?? null);
+        if (next !== lastLine) {
+          debug("v2 line:", "active=", String(sid ?? "none"), "->", next);
+          lastLine = next;
+        }
+        setLine(next);
+      } catch (error) {
+        debug(
+          "v2 refresh error:",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    };
+
+    slot({
+      append: "session_prompt_right",
+      render: (props) => {
+        try {
+          const sid = resolveSessionID(props?.session_id, {
+            current: routeCurrent(),
+          });
+          if (sid) activeSessionID = sid;
+          void refresh(sid ?? undefined);
+          const b = badge();
+          return (
+            <text fg={mutedFg(ctx?.theme)}>
+              {" "}
+              {line()}
+              {b ? ` ${b}` : ""}{" "}
+            </text>
+          );
+        } catch (error) {
+          const msg =
+            error instanceof Error
+              ? (error.stack ?? error.message)
+              : String(error);
+          debug("v2 slot render error:", msg);
+          return null;
+        }
+      },
+    });
+    debug("v2 slot session_prompt_right registered");
+
+    // /stats: a live dialog over the same handoff read (best-effort). The
+    // dialog body is a signal: the 1 s poll re-renders it while it is open.
+    const [dialogBody, setDialogBody] = createSignal<string>("");
+    let dialogOpen = false;
+    const openDialog = (): void => {
+      const dialog = ctx?.ui?.dialog;
+      if (typeof dialog?.show === "function") {
+        dialog.show(
+          () => <text>{dialogBody()}</text>,
+          () => {
+            dialogOpen = false;
+          },
+        );
+        dialogOpen = true;
+      } else if (typeof dialog?.alert === "function") {
+        void dialog.alert({ title: "/stats", message: dialogBody() });
+      }
+    };
+    const showStats = async (): Promise<void> => {
+      try {
+        setDialogBody(await statsBody());
+        openDialog();
+      } catch (error) {
+        dialogOpen = false;
+        debug(
+          "v2 /stats failed silently:",
+          error instanceof Error ? error.message : String(error),
+        );
+        try {
+          ctx?.ui?.dialog?.clear?.();
+        } catch {
+          /* nothing to clear */
+        }
+      }
+    };
+    const refreshDialog = async (): Promise<void> => {
+      if (!dialogOpen) return;
+      try {
+        const body = await statsBody();
+        // the read awaits ~120 ms: the dialog may have been closed meanwhile
+        if (dialogOpen) setDialogBody(body);
+      } catch (error) {
+        debug(
+          "v2 stats dialog refresh error:",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    };
+
+    const poll = setInterval(() => {
+      void refresh();
+      void refreshDialog();
+    }, 1000);
+    try {
+      poll.unref?.();
+    } catch {
+      /* unref is Node/Bun-specific; fine to keep the interval un-unref'd */
+    }
+    const badgePoll = setInterval(() => void refreshBadge(), 30000);
+    try {
+      badgePoll.unref?.();
+    } catch {
+      /* same as above */
+    }
+
+    let disposed = false;
+    const dispose = (): void => {
+      if (disposed) return;
+      disposed = true;
+      try {
+        clearInterval(poll);
+        clearInterval(badgePoll);
+        dialogOpen = false;
+      } catch {
+        /* silent-degradation contract: dispose never throws */
+      }
+    };
+
+    // The command is registered from INSIDE a slot render: ctx.keymap.layer
+    // (createLayer) needs the host's Keymap.Provider context, which only
+    // exists within the rendered tree — the built-in stats plugin does the
+    // same from its `app` slot. Registering it directly in setup throws
+    // "Keymap.Provider is missing".
+    slot({
+      append: "app",
+      render: () => {
+        const layer = ctx?.keymap?.layer;
+        if (typeof layer !== "function") return null;
+        try {
+          return layer(() => ({
+            mode: "global",
+            commands: [
+              {
+                id: "opencode-ollama-cloud.stats.show",
+                title: "Ollama Cloud stats",
+                group: "Plugins",
+                palette: true,
+                run() {
+                  void showStats();
+                },
+              },
+            ],
+          }));
+        } catch (error) {
+          debug(
+            "v2 keymap layer error:",
+            error instanceof Error ? error.message : String(error),
+          );
+          return null;
+        }
+      },
+    });
+    return dispose;
+  } catch (error) {
+    // degradación silenciosa: stats UI down, provider/catalog untouched
+    debug(
+      "v2 setup threw:",
+      error instanceof Error ? (error.stack ?? error.message) : String(error),
+    );
+    return;
+  }
+}
+
 export default {
   id: "opencode-ollama-cloud-tui",
+  setup: setupV2Tui,
   async tui(
     api: TuiLike,
     options?: {
@@ -204,9 +452,8 @@ export default {
       "tui module entry, version",
       String((api as { app?: { version?: string } }).app?.version ?? "?"),
     );
-    // This module only ever loads on opencode 1.x hosts (v2.0.x has no
-    // reachable third-party TUI plugin loading path — research doc §TUI), so
-    // like the server factory, presence here means v1: one silent log line.
+    // This factory is the V1 path (opencode 1.x); the V2 host calls `setup`
+    // instead. Presence here therefore means v1: one silent log line.
     logDeprecatedV1(options?.deprecation);
     try {
       // knob (ticket 08): opt-out supported from BOTH module entries
@@ -408,7 +655,7 @@ export default {
       }
 
       if (features.keymap) {
-        api.keymap.registerLayer({
+        api.keymap?.registerLayer({
           commands: [
             {
               name: "opencode-ollama-cloud.stats.show",

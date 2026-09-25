@@ -59,13 +59,13 @@ The plugin ships a **dual entry** that both host generations load natively — o
 
 Per-host differences (verified against opencode 2.0.15 — details in `docs/research/soporte-v1-v2.md`):
 
-| Feature                                         | V1 (1.18.x)        | V2 (2.0.x)                                                      |
-| ----------------------------------------------- | ------------------ | --------------------------------------------------------------- |
-| Catalog + official pricing                      | ✅ `provider` hook | ✅ `provider.transform`                                         |
-| Stats capture (TTFT/TPS line, `/stats`)         | ✅                 | ❌ no plugin-reachable fetch seam or event bus in 2.0.15        |
-| TUI module (stats line, `/stats`, update badge) | ✅ via `tui.json`  | ❌ 2.0.x exposes no third-party TUI plugin loading path         |
-| Self-update (eviction + toast/badge)            | ✅                 | ❌ the host's own `opencode plugin update` owns package updates |
-| Deprecation notice                              | silent log line    | n/a (V2 is the current generation)                              |
+| Feature                                         | V1 (1.18.x)        | V2 (2.0.x)                                                         |
+| ----------------------------------------------- | ------------------ | ------------------------------------------------------------------ |
+| Catalog + official pricing                      | ✅ `provider` hook | ✅ `provider.transform`                                            |
+| Stats capture (TTFT/TPS line, `/stats`)         | ✅                 | ❌ no plugin-reachable fetch seam or event bus in 2.0.15           |
+| TUI module (stats line, `/stats`, update badge) | ✅ via `tui.json`  | ✅ via the plugin registry; live numbers still need the V1 capture |
+| Self-update (eviction + toast/badge)            | ✅                 | ❌ the host's own `opencode plugin update` owns package updates    |
+| Deprecation notice                              | silent log line    | n/a (V2 is the current generation)                                 |
 
 Registering a `provider.transform` **takes ownership** of the provider's model list: once the plugin's transform is registered, opencode stops merging models.dev's `ollama-cloud` entries. The plugin only registers the transform after the catalog loads with at least one model — on catalog failure the models.dev fallback stays alive.
 
@@ -104,7 +104,7 @@ Prefer editing the config yourself? Add the plugin to `~/.config/opencode/openco
 - `catalogUrl`: alternative catalog URL (tried first).
 - `timeoutMs`: per-fetch timeout (default `5000`).
 - `pricing`: `"on"` (default) or `"off"`. Controls whether opencode's session cost counter shows the official Ollama Cloud rate. `pricing: "reference"` (the old opt-in value) still works and means `"on"`.
-- `tui`: `"ensure"` (opt-in, default off). The server entry registers the TUI entry itself by patching the tui.json opencode will read (`$OPENCODE_TUI_CONFIG` when set, else the global one). Idempotent, comment-preserving, effective on the next TUI launch. Dev installs (repo paths) never patch anything. V1 only — opencode 2.x has no TUI plugin loading path, so under V2 this knob has nothing to do.
+- `tui`: `"ensure"` (opt-in, default off). The server entry registers the TUI entry itself by patching the tui.json opencode will read (`$OPENCODE_TUI_CONFIG` when set, else the global one). Idempotent, comment-preserving, effective on the next TUI launch. Dev installs (repo paths) never patch anything. V1 only, because only the V1 host reads `tui.json`. On V2, register the package with `opencode plugin add`; the host loads the TUI module from `exports["./tui"]` on its own.
 - `deprecation`: `"on"` (default) or `"off"`. On a V1 host, writes the silent deprecation notice to `~/.cache/opencode-ollama-cloud/deprecation.log`. `"off"` silences it. No effect under V2.
 
 ```json
@@ -131,7 +131,7 @@ The line on the right is the plugin's: `197.0 tok/s · TTFT 1298 ms · Session a
 
 The average only counts the main conversation. Subagents, title generation and compaction never enter it (measured signals verified against opencode's source). Numbers live in memory per session; nothing is stored and nothing leaves your machine. The stats UI ships as a second plugin entry and degrades silently: on an opencode build where the TUI API moved, the provider and catalog keep working and the stats line simply disappears (tested against opencode 1.18.27; the plugin API it uses exists but is undocumented, so treat the stats UI as best-effort until upstream documents it).
 
-The provider entry stays in `opencode.json`'s `plugin` array as usual. The TUI entry goes in `tui.json`. Since opencode 1.18, the TUI host only loads its plugins from `~/.config/opencode/tui.json` (or the project's); the `plugin` array in `opencode.json` is ignored on the TUI side.
+On a V1 host the provider entry stays in `opencode.json`'s `plugin` array and the TUI entry goes in `tui.json`. Since opencode 1.18 the V1 TUI host loads plugins only from `~/.config/opencode/tui.json` (or the project's) and ignores `opencode.json`. On V2 the same package carries both entries: the registry in `cli.json` loads the server entry from `main` and the TUI entry from `exports["./tui"]`.
 
 For npm installs, the CLI command registers both entries in one step (it reads this package's `main` and `exports["./tui"]` and patches both configs):
 
@@ -157,6 +157,8 @@ opencode.json:
   "plugin": ["/absolute/path/to/opencode-ollama-cloud/plugin/tui.tsx"]
 }
 ```
+
+On V2 you don't edit `tui.json`. `opencode plugin add @srnoob2570/opencode-ollama-cloud` writes the registry, and the host resolves the TUI module from the package's `exports["./tui"]`, which points at the precompiled `plugin/tui.js`.
 
 - `stats`: `"on"` (default) or `"off"`. Set it on both entries (tuple form, e.g. `["…", { "stats": "off" }]`) and everything turns off: no measurement, no UI, exactly yesterday's plugin.
 

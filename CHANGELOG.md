@@ -3,6 +3,24 @@
 Entries here follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [SemVer](https://semver.org/spec/v2.0.0.html).
 Each version also lives on the [releases page](https://github.com/srnoob2570/opencode-ollama-cloud/releases).
 
+## [Unreleased]
+
+### Fixed
+
+- The TUI module loads under opencode V2. The package advertises a TUI entry through `exports["./tui"]`, and 2.x resolves it from `node_modules`, where the host does not apply the Solid JSX transform. The raw JSX in `plugin/tui.tsx` therefore fell back to React's runtime and the plugin failed with `Cannot find package 'react'`. The TUI entry now ships precompiled as `plugin/tui.js`, with JSX compiled to the `@opentui/solid/jsx-runtime` specifier that the host rewrites, and the module exports the V2 contract `{ id, setup }` next to the V1 `tui` factory. Verified end to end on opencode 2.0.15: the setup registers the stats line slot, the update badge and the `/stats` command, with no react error.
+
+### Added
+
+- `setup(ctx)` for the V2 TUI host. It renders the live stats line in the `session_prompt_right` slot, registers a `/stats` command in the command palette and shows the update badge. The command layer is registered from inside an `app` slot render, because `ctx.keymap.layer` needs the host's Keymap provider, which exists only in the rendered tree.
+
+### Changed
+
+- `package.json` `exports["./tui"]` points at the precompiled `plugin/tui.js`, which `files` ships. `bun run build:tui` compiles `plugin/tui.tsx` with Bun's automatic JSX runtime (`jsxImportSource: "@opentui/solid"`). A pre-commit hook rebuilds the file when the source changes, and `.prettierignore` keeps the generated file out of formatting.
+
+### Docs
+
+- The READMEs and `docs/research/soporte-v1-v2.md` no longer claim that V2 cannot load third-party TUI plugins. V2 loads them through the plugin registry: the package exposes `exports["./tui"]` and the module exports `{ id, setup }`.
+
 ## [0.1.12] - 2026-09-23
 
 ### Added
@@ -189,7 +207,7 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 - README in English and Spanish.
 - CI refreshes the catalog on a schedule and verifies the catalog before publishing.
 
-[Unreleased]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.12...HEAD
 [0.1.9]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.6...v0.1.7

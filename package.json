@@ -19,7 +19,7 @@
   "exports": {
     ".": "./plugin/index.ts",
     "./server": "./plugin/index.ts",
-    "./tui": "./plugin/tui.tsx"
+    "./tui": "./plugin/tui.js"
   },
   "files": [
     "plugin/catalog.ts",
@@ -34,9 +34,11 @@
     "plugin/handoff.ts",
     "plugin/tui-display.ts",
     "plugin/tui.tsx",
+    "plugin/tui.js",
     "plugin/version.ts"
   ],
   "scripts": {
+    "build:tui": "bun build plugin/tui.tsx --target=bun --format=esm --external '*' --outfile plugin/tui.js",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
@@ -46,6 +48,7 @@
   "devDependencies": {
     "@opencode-ai/plugin": "1.18.32",
     "@opencode-ai/sdk": "1.18.32",
+    "@opentui/solid": "^0.5.12",
     "@types/bun": "^1.4.0",
     "@types/node": "^24.0.0",
     "typescript": "5.9.3"
