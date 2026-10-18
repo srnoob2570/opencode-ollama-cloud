@@ -12,9 +12,13 @@
 
 ## Gotchas
 
-- `publish.yml` fires on the `v*` tag push and publishes to npm via OIDC
-  trusted publishing — no local `npm publish`, no npm token secret;
-  npmjs.com trusts this repo + workflow filename.
+- `publish.yml` fires on the `v*` tag push and runs `npm stage publish`
+  (stage-only trusted publishing via OIDC — no npm token secret; npmjs.com
+  trusts this repo + workflow filename). CI only STAGES the version: the
+  release is NOT live on npm until a maintainer approves the stage with
+  2FA — `npm stage approve <stage-id>` from a logged-in CLI session, or the
+  Staged Packages tab on npmjs.com. The stage id is in the workflow log
+  ("staged with id ..."). Staged versions do not expire.
 - The workflow refuses a tag that does not match `package.json`'s version,
   and tolerates a re-pushed tag when the version is already on the registry.
 - The tag's subject is the released section's first changelog entry and its
