@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { isCatalog, toCatalogModel, type ArtifactModel } from "./catalog.ts";
+import {
+  isCatalog,
+  toCatalogModel,
+  usableModels,
+  type ArtifactModel,
+} from "./catalog.ts";
 
 // Fixture mirrors the live artifact shape (models.dev shape + x_ollama),
 // published by srnoob2570/ollama-cloud-catalog.
@@ -35,7 +40,10 @@ const docWith = (models: ArtifactModel[]) => ({
   },
 });
 
-describe("isCatalog", () => {
+// The envelope guard: structure of the document only. Per-entry damage is
+// usableModels' business — a malformed entry must never reject the whole
+// artifact and hide the good models behind it (the beam incident).
+describe("isCatalog (envelope guard)", () => {
   const validModel = entry("glm-5.3");
   const validDoc = docWith([validModel]);
 
@@ -43,41 +51,40 @@ describe("isCatalog", () => {
     expect(isCatalog(validDoc)).toBe(true);
   });
 
-  test("rejects context 0 (regression guard)", () => {
-    const bad = docWith([{ ...validModel, limit: { context: 0, output: 1 } }]);
-    expect(isCatalog(bad)).toBe(false);
-  });
-
-  test("rejects missing release_date (consumed as a required string downstream)", () => {
-    const noDate: Record<string, unknown> = { ...validModel };
-    delete noDate.release_date;
-    expect(isCatalog(docWith([noDate as unknown as ArtifactModel]))).toBe(
-      false,
-    );
-  });
-
-  test("rejects missing name and non-boolean flags", () => {
-    const noName: Record<string, unknown> = { ...validModel };
-    delete noName.name;
-    expect(isCatalog(docWith([noName as unknown as ArtifactModel]))).toBe(
-      false,
-    );
+  test("accepts an artifact carrying broken or partial model entries", () => {
+    // clef:27b exactly as published 2026-10-17: no limit.output, input-only
+    // cost, no decision marker yet. The document itself is fine — the bad
+    // ENTRY is dropped later, by usableModels.
+    const clefAsPublished = {
+      ...entry("clef:27b"),
+      limit: { context: 65536 },
+      cost: { input: 0.24 },
+    };
     expect(
       isCatalog(
-        docWith([{ ...validModel, reasoning: 1 } as unknown as ArtifactModel]),
+        docWith([validModel, clefAsPublished as unknown as ArtifactModel]),
       ),
-    ).toBe(false);
-  });
-
-  test("rejects non-objects and shapeless models", () => {
-    expect(isCatalog(null)).toBe(false);
-    expect(isCatalog("null")).toBe(false);
+    ).toBe(true);
+    // fully shapeless entries pass the envelope too
     expect(
       isCatalog({
         ...validDoc,
         provider: { ...validDoc.provider, models: { x: { id: 42 } } },
       }),
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  test("rejects non-objects", () => {
+    expect(isCatalog(null)).toBe(false);
+    expect(isCatalog("null")).toBe(false);
+  });
+
+  test("rejects a missing or non-record models block", () => {
+    for (const models of [undefined, [], "x", 42]) {
+      const doc = docWith([validModel]);
+      (doc.provider as Record<string, unknown>).models = models;
+      expect(isCatalog(doc)).toBe(false);
+    }
   });
 
   test("rejects a broken models_hash gate fingerprint", () => {
@@ -105,76 +112,99 @@ describe("isCatalog", () => {
   });
 });
 
-// Optional quantization: absent always loads; a present one is shape-only —
-// raw values and "unknown" pass, no enum, so a new Ollama format can never
-// break the loader (the updater's policy: CI advises, never fails).
-describe("isCatalog optional quantization", () => {
-  const validModel = entry("glm-5.3");
+// The per-entry gate: the document loads even when some entries cannot
+// serve. Broken entries are dropped with a warning — never a whole-document
+// rejection; decision models are excluded by their marker.
+describe("usableModels", () => {
+  const good = entry("glm-5.3");
+  const beam = entry("beam");
 
-  test("absent field loads", () => {
-    expect(isCatalog(docWith([{ ...validModel, x_ollama: {} }]))).toBe(true);
+  test("one broken entry never hides the good ones (the beam incident)", () => {
+    const clefAsPublished = {
+      ...entry("clef:27b"),
+      limit: { context: 65536 },
+      cost: { input: 0.24 },
+    };
+    const models = usableModels(
+      docWith([good, clefAsPublished as unknown as ArtifactModel, beam])
+        .provider.models,
+    );
+    expect(models.map((m) => m.id).sort()).toEqual(["beam", "glm-5.3"]);
   });
 
-  test("raw values and the unknown literal load", () => {
-    for (const value of ["FP8", "MXFP4", "unknown", "Some-New-Format-2049"])
-      expect(
-        isCatalog(
-          docWith([{ ...validModel, x_ollama: { quantization: value } }]),
-        ),
-      ).toBe(true);
+  test("drops entries failing a served-shape requirement", () => {
+    const cases: Record<string, unknown>[] = [
+      { id: 42 }, // shapeless
+      { ...good, limit: { context: 0, output: 131072 } },
+      { ...good, limit: { context: 65536 } }, // no limit.output
+      { ...good, limit: { context: 65536, output: 0 } },
+      { ...good, modalities: { input: "text" } },
+      { ...good, reasoning: 1 },
+      { ...good, x_ollama: { quantization: "" } },
+      { ...good, x_ollama: { quantization: 8 } },
+      { ...good, x_ollama: { reasoning_options: "low" } },
+    ];
+    for (const raw of cases) expect(usableModels({ bad: raw })).toEqual([]);
+    const noName = { ...good } as Record<string, unknown>;
+    delete noName.name;
+    const noDate = { ...good } as Record<string, unknown>;
+    delete noDate.release_date;
+    expect(usableModels({ a: noName, b: noDate })).toEqual([]);
   });
 
-  test("garbage is rejected (empty string, numbers)", () => {
-    expect(
-      isCatalog(docWith([{ ...validModel, x_ollama: { quantization: "" } }])),
-    ).toBe(false);
-    expect(
-      isCatalog(
-        docWith([
-          {
-            ...validModel,
-            x_ollama: { quantization: 8 as unknown as string },
-          },
-        ]),
-      ),
-    ).toBe(false);
-  });
-});
-
-// The official rate now rides INSIDE the artifact (each entry's cost block):
-// the loader checks positive-finite invariants on what it consumes so a
-// malformed entry never reaches the cost counter.
-describe("isCatalog embedded cost", () => {
-  const validModel = entry("glm-5.3-flash", {
-    cost: { input: 0.03, output: 0.1, cache_read: 0.007 },
-  });
-
-  test("absent cost loads (third-party/custom catalogs stay valid)", () => {
-    expect(isCatalog(docWith([{ ...validModel, cost: undefined }]))).toBe(true);
-  });
-
-  test("zero, negative, NaN and Infinity rates are rejected", () => {
-    for (const over of [
-      { input: 0, output: 1 },
-      { input: -1, output: 1 },
-      { input: Number.NaN, output: 1 },
-      { input: 1, output: 1e999 },
+  test("absent x_ollama and unknown quantization formats stay usable (no enum)", () => {
+    for (const raw of [
+      { ...good, x_ollama: undefined },
+      { ...good, x_ollama: {} },
+      { ...good, x_ollama: { quantization: "unknown" } },
+      { ...good, x_ollama: { quantization: "Some-New-Format-2049" } },
     ]) {
-      expect(isCatalog(docWith([{ ...validModel, cost: over }]))).toBe(false);
+      expect(usableModels({ m: raw })).toHaveLength(1);
     }
   });
 
-  test("cache_read is optional but must be positive-finite", () => {
-    expect(
-      isCatalog(docWith([{ ...validModel, cost: { input: 1, output: 1 } }])),
-    ).toBe(true);
-    expect(
-      isCatalog(
-        docWith([
-          { ...validModel, cost: { input: 1, output: 1, cache_read: -0.01 } },
-        ]),
-      ),
-    ).toBe(false);
+  test("garbage cost never drops a model — it serves rateless ($0)", () => {
+    const models = usableModels({ m: { ...good, cost: { input: 0 } } });
+    expect(models).toHaveLength(1);
+    expect(models[0].cost).toBeUndefined();
+  });
+});
+
+// Decision models (served via /v1/systemone, not /api/chat) are excluded
+// by the artifact's x_ollama.decision marker — opencode cannot use them.
+describe("usableModels decision exclusion", () => {
+  test("excludes an otherwise valid entry marked decision: true", () => {
+    const decision = entry("clef:27b", {
+      limit: { context: 65536, output: 65536 },
+      x_ollama: { quantization: "BF16", decision: true },
+    });
+    const models = usableModels(
+      docWith([decision, entry("beam")]).provider.models,
+    );
+    expect(models.map((m) => m.id)).toEqual(["beam"]);
+  });
+
+  test("excludes a marked decision entry even with an unservable shape (marker first)", () => {
+    // the shape the catalog will publish once it carries the marker:
+    // limit.output omitted by design (never serves /api/chat)
+    const clefMarked = {
+      ...entry("clef:27b"),
+      limit: { context: 65536 },
+      cost: { input: 0.24 },
+      x_ollama: { quantization: "BF16", decision: true },
+    };
+    const models = usableModels(
+      docWith([clefMarked as unknown as ArtifactModel, entry("beam")]).provider
+        .models,
+    );
+    expect(models.map((m) => m.id)).toEqual(["beam"]);
+  });
+
+  test("a non-true decision value keeps a served-shape entry (tolerant read)", () => {
+    const odd = entry("glm-5.3", {
+      x_ollama: { quantization: "FP8", decision: "yes" as unknown as boolean },
+    });
+    expect(usableModels(docWith([odd]).provider.models)).toHaveLength(1);
   });
 });
 
@@ -205,14 +235,27 @@ describe("toCatalogModel", () => {
     ).toBe(true);
   });
 
-  test("reasoning_options filter non-strings (isCatalog checks the array shape only)", () => {
+  test("reasoning_options filter non-strings (the gate checks the array shape only)", () => {
     const dirty = entry("glm-5.3", {
       x_ollama: { reasoning_options: ["low", 42, null, "high"] },
     });
     expect(toCatalogModel(dirty).reasoningOptions).toEqual(["low", "high"]);
   });
 
-  test("cost maps cache_read → cachedInput; absent cost stays absent", () => {
+  test("quantization passes through raw (declared by Ollama)", () => {
+    expect(toCatalogModel(entry("glm-5.3")).quantization).toBe("FP8");
+    expect(
+      toCatalogModel(entry("gemma4:31b", { x_ollama: {} })).quantization,
+    ).toBeUndefined();
+  });
+});
+
+// All-or-nothing cost adoption: the cost block is one claim — partial or
+// malformed adopts nothing (rateless $0, the documented safe default)
+// instead of a wrong price. output/cache_read of 0 are legitimate rates
+// (free tokens publish as $0).
+describe("toCatalogModel cost adoption", () => {
+  test("adopts a complete sane cost block (cache_read → cachedInput)", () => {
     const withCost = toCatalogModel(
       entry("deepseek-v4-flash:0731", {
         cost: { input: 0.22, output: 0.66, cache_read: 0.007 },
@@ -223,13 +266,40 @@ describe("toCatalogModel", () => {
       output: 0.66,
       cachedInput: 0.007,
     });
+  });
+
+  test("adopts free-token rates: output 0 and cache_read 0", () => {
+    expect(
+      toCatalogModel(
+        entry("clef:27b", { cost: { input: 0.24, output: 0, cache_read: 0 } }),
+      ).cost,
+    ).toEqual({ input: 0.24, output: 0, cachedInput: 0 });
+  });
+
+  test("input-only cost (what clef:27b publishes today) adopts nothing", () => {
+    expect(
+      toCatalogModel(entry("clef:27b", { cost: { input: 0.24 } })).cost,
+    ).toBeUndefined();
+  });
+
+  test("absent cost stays absent", () => {
     expect(toCatalogModel(entry("glm-5.3")).cost).toBeUndefined();
   });
 
-  test("quantization passes through raw (declared by Ollama)", () => {
-    expect(toCatalogModel(entry("glm-5.3")).quantization).toBe("FP8");
-    expect(
-      toCatalogModel(entry("gemma4:31b", { x_ollama: {} })).quantization,
-    ).toBeUndefined();
+  test("garbage rates adopt nothing but the model survives rateless", () => {
+    for (const cost of [
+      { input: 0 },
+      { input: -1 },
+      { input: Number.NaN },
+      { input: 1e999 },
+      { input: 0.24, output: -1 },
+      { input: 0.24, output: Number.NaN },
+      { input: 0.24, output: 1, cache_read: -0.01 },
+      { input: 0.24, output: 1, cache_read: Number.POSITIVE_INFINITY },
+    ]) {
+      const m = toCatalogModel(entry("glm-5.3", { cost }));
+      expect(m.cost).toBeUndefined();
+      expect(m.id).toBe("glm-5.3");
+    }
   });
 });

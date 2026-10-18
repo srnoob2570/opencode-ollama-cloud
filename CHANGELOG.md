@@ -8,6 +8,7 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 ### Fixed
 
 - The TUI module loads under opencode V2. The package advertises a TUI entry through `exports["./tui"]`, and 2.x resolves it from `node_modules`, where the host does not apply the Solid JSX transform. The raw JSX in `plugin/tui.tsx` therefore fell back to React's runtime and the plugin failed with `Cannot find package 'react'`. The TUI entry now ships precompiled as `plugin/tui.js`, with JSX compiled to the `@opentui/solid/jsx-runtime` specifier that the host rewrites, and the module exports the V2 contract `{ id, setup }` next to the V1 `tui` factory. Verified end to end on opencode 2.0.15: the setup registers the stats line slot, the update badge and the `/stats` command, with no react error.
+- New catalog models appear again. A single malformed entry in the published artifact (`clef:27b`, a decision model that publishes no output limit) rejected the whole document, so the loader silently fell back to the stale disk cache and every model published after 2026-10-15 — `beam` among them — stayed invisible. The loader now validates the document's envelope and gates each entry on its own: a broken entry is dropped with a warning while every usable model still loads.
 
 ### Added
 
@@ -16,6 +17,7 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 ### Changed
 
 - `package.json` `exports["./tui"]` points at the precompiled `plugin/tui.js`, which `files` ships. `bun run build:tui` compiles `plugin/tui.tsx` with Bun's automatic JSX runtime (`jsxImportSource: "@opentui/solid"`). A pre-commit hook rebuilds the file when the source changes, and `.prettierignore` keeps the generated file out of formatting.
+- Decision models are excluded from the catalog. An entry marked `x_ollama.decision: true` serves Ollama's `/v1/systemone`, not `/api/chat`; opencode cannot use it, so the loader skips it by marker. A partial or malformed `cost` block adopts nothing: the model serves rateless ($0) instead of a wrong price, and `output`/`cache_read` rates of $0 are adopted as legitimate free rates.
 
 ### Docs
 

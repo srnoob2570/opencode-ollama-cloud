@@ -68,22 +68,42 @@ export interface PluginOpts {
 
 /** The published artifact (models.dev shape plus the x_ollama extension),
  * the loader's view before normalization. */
+/** The served shape of one artifact entry — the loader's view AFTER the
+ * per-entry gate (usableModels) has passed it. Wire optionality the gate
+ * does not enforce stays in the types: the cost fields (adoption is
+ * all-or-nothing in toCatalogModel) and the decision marker (checked
+ * before the gate, inside usableModels). */
 export interface ArtifactModel {
   id: string;
   name: string;
   attachment: boolean;
   reasoning: boolean;
   tool_call: boolean;
-  cost?: { input: number; output: number; cache_read?: number };
+  /** Cost is optional on the wire (third-party catalogs, deliberately
+   * unpriced promos) and so are its fields: a decision model publishes
+   * input-only because its output tokens are free. toCatalogModel adopts
+   * the block only when complete and sane — never a partial price. */
+  cost?: { input: number; output?: number; cache_read?: number };
+  /** limit.output is required to serve: the gate enforces it, so
+   * normalization can trust it. Decision models omit it by design (they
+   * never serve /api/chat) and never pass the gate. */
   limit: { context: number; output: number };
   modalities: { input: string[] };
   release_date: string;
   x_ollama?: {
     quantization?: string;
     reasoning_options?: unknown[];
+    /** True only on decision models (served via /v1/systemone, not
+     * /api/chat). The artifact's marker is the contract: usableModels
+     * excludes them — opencode cannot use them. */
+    decision?: boolean;
   };
 }
 
+/** Envelope-validated document (isCatalog checks the provider block, the
+ * x_ollama meta, and that models is a record). The VALUES of models are
+ * only known-good after usableModels gates each entry — this type
+ * describes the served shape; the gate enforces it at runtime. */
 export interface ArtifactDoc {
   provider: {
     id: string;
@@ -107,9 +127,15 @@ const DEFAULT_URLS = [
 const CACHE_DIR = join(homedir(), ".cache", "opencode-ollama-cloud");
 const CACHE_FILE = join(CACHE_DIR, "catalog.json");
 
-/** Positive finite number — the invariant every cost value must carry. */
-const positiveFinite = (value: unknown): boolean =>
+/** Positive finite number — the invariant every input rate must carry. */
+const positiveFinite = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value > 0;
+
+/** Nonnegative finite number — output/cache_read rates accept 0: free
+ * tokens are a legitimate published price (a decision model's output and
+ * cache cells publish as $0). Input must stay positive (positiveFinite). */
+const nonnegativeFinite = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0;
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0;
@@ -117,71 +143,98 @@ const isNonEmptyString = (value: unknown): value is string =>
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((v) => typeof v === "string");
 
-/** Loader-side shape check of the published artifact. It mirrors
- * schemas/catalog.schema.json on the fields the plugin CONSUMES — extra
- * fields (peak_cost, parameter_count, ollama_family, modalities.output,
- * status, description…) pass unchecked: the published schema is the
- * stricter contract, the loader only guards its own reads. The $schema
- * pointer is metadata, not validated. */
+/** Loader-side ENVELOPE check of the published artifact: provider block,
+ * x_ollama meta, and that models is a record. Per-model validation is
+ * deliberately NOT here — it lives in usableModels, which drops or skips
+ * individual entries. The beam incident fixed the invariant: one malformed
+ * entry (clef:27b publishing no limit.output) must never hide the good
+ * models behind it by rejecting the whole document. Extra fields
+ * (peak_cost, parameter_count, ollama_family, modalities.output, status,
+ * description…) pass unchecked: the published schema is the stricter
+ * contract, the loader only guards its own reads. The $schema pointer is
+ * metadata, not validated. */
 export function isCatalog(value: unknown): value is ArtifactDoc {
   if (typeof value !== "object" || value === null) return false;
   const doc = value as Record<string, unknown>;
   const provider = doc.provider as Record<string, unknown> | undefined;
   const meta = doc.x_ollama as Record<string, unknown> | undefined;
   const models = provider?.models as Record<string, unknown> | undefined;
-  if (
-    !isNonEmptyString(provider?.id) ||
-    !isNonEmptyString(provider?.name) ||
-    !isNonEmptyString(provider?.npm) ||
-    !isNonEmptyString(provider?.doc) ||
-    !Array.isArray(provider?.env) ||
-    !provider.env.every((v) => typeof v === "string") ||
-    typeof models !== "object" ||
-    models === null ||
-    Array.isArray(models) ||
-    !isNonEmptyString(meta?.generated_at) ||
+  return (
+    isNonEmptyString(provider?.id) &&
+    isNonEmptyString(provider?.name) &&
+    isNonEmptyString(provider?.npm) &&
+    isNonEmptyString(provider?.doc) &&
+    Array.isArray(provider?.env) &&
+    provider.env.every((v) => typeof v === "string") &&
+    typeof models === "object" &&
+    models !== null &&
+    !Array.isArray(models) &&
+    isNonEmptyString(meta?.generated_at) &&
     // sha256 gate fingerprint (catalog.schema.json: ^[0-9a-f]{64}$)
-    typeof meta?.models_hash !== "string" ||
-    !/^[0-9a-f]{64}$/.test(meta.models_hash)
-  )
-    return false;
+    typeof meta?.models_hash === "string" &&
+    /^[0-9a-f]{64}$/.test(meta.models_hash)
+  );
+}
 
-  return Object.values(models).every((raw) => {
-    if (typeof raw !== "object" || raw === null) return false;
-    const m = raw as Record<string, unknown>;
-    const limit = m.limit as Record<string, unknown> | undefined;
-    const modalities = m.modalities as Record<string, unknown> | undefined;
-    const cost = m.cost as Record<string, unknown> | undefined;
-    const x = m.x_ollama as Record<string, unknown> | undefined;
-    // schema requires >= 1; a bare typeof check would accept context: 0
-    // and serve a broken model
-    return (
-      isNonEmptyString(m.id) &&
-      isNonEmptyString(m.name) &&
-      typeof m.attachment === "boolean" &&
-      typeof m.reasoning === "boolean" &&
-      typeof m.tool_call === "boolean" &&
-      typeof limit?.context === "number" &&
-      limit.context >= 1 &&
-      typeof limit?.output === "number" &&
-      limit.output >= 1 &&
-      isStringArray(modalities?.input) &&
-      // consumed downstream as ModelV2.release_date, a required string
-      isNonEmptyString(m.release_date) &&
-      (cost === undefined ||
-        (positiveFinite(cost.input) &&
-          positiveFinite(cost.output) &&
-          (cost.cache_read === undefined ||
-            positiveFinite(cost.cache_read)))) &&
-      (x === undefined ||
-        ((x.quantization === undefined ||
-          (typeof x.quantization === "string" && x.quantization.length > 0)) &&
-          // shape-only: non-string entries are dropped by the adapter so
-          // garbage effort keys never reach the TUI picker or a 400 upstream
-          (x.reasoning_options === undefined ||
-            Array.isArray(x.reasoning_options))))
-    );
-  });
+/** Per-entry gate: everything opencode needs to SERVE the model. Mirrors
+ * the fields the plugin consumes — id/name/flags/limits/modalities/
+ * release_date, plus the x_ollama shapes toCatalogModel reads (no closed
+ * enum: a new Ollama format must not break the loader). Cost is NOT
+ * checked here: it is optional metadata, and its adoption is all-or-nothing
+ * in toCatalogModel. Type predicate: an ArtifactModel claim is only sound
+ * after this passes. */
+function usableEntry(raw: unknown): raw is ArtifactModel {
+  if (typeof raw !== "object" || raw === null) return false;
+  const m = raw as Record<string, unknown>;
+  const limit = m.limit as Record<string, unknown> | undefined;
+  const modalities = m.modalities as Record<string, unknown> | undefined;
+  const x = m.x_ollama as Record<string, unknown> | undefined;
+  // schema requires >= 1; a bare typeof check would accept context: 0 or
+  // output: 0 and serve a broken model. Decision models publish no
+  // limit.output — they cannot serve /api/chat and stay out.
+  return (
+    isNonEmptyString(m.id) &&
+    isNonEmptyString(m.name) &&
+    typeof m.attachment === "boolean" &&
+    typeof m.reasoning === "boolean" &&
+    typeof m.tool_call === "boolean" &&
+    typeof limit?.context === "number" &&
+    limit.context >= 1 &&
+    typeof limit?.output === "number" &&
+    limit.output >= 1 &&
+    isStringArray(modalities?.input) &&
+    // consumed downstream as ModelV2.release_date, a required string
+    isNonEmptyString(m.release_date) &&
+    (x === undefined ||
+      ((x.quantization === undefined ||
+        (typeof x.quantization === "string" && x.quantization.length > 0)) &&
+        // shape-only: non-string entries are dropped by the adapter so
+        // garbage effort keys never reach the TUI picker or a 400 upstream
+        (x.reasoning_options === undefined ||
+          Array.isArray(x.reasoning_options))))
+  );
+}
+
+/** Artifact entries → the models opencode can actually use. Decision
+ * models (x_ollama.decision: true — served via /v1/systemone, not
+ * /api/chat) are excluded silently: the artifact's marker is the
+ * contract. Any other entry failing the served-shape gate is dropped
+ * with a warning — one broken entry never hides the good ones (the beam
+ * incident); the rest of the document still loads. */
+export function usableModels(models: Record<string, unknown>): CatalogModel[] {
+  const usable: CatalogModel[] = [];
+  for (const [key, raw] of Object.entries(models)) {
+    const x = (raw as { x_ollama?: { decision?: unknown } } | null)?.x_ollama;
+    if (x?.decision === true) continue;
+    if (!usableEntry(raw)) {
+      console.warn(
+        `opencode-ollama-cloud: dropping unusable catalog entry "${key}"`,
+      );
+      continue;
+    }
+    usable.push(toCatalogModel(raw));
+  }
+  return usable;
 }
 
 /** Catalog family = id base (familia[:tag], CONTEXT.md vocabulary). */
@@ -189,6 +242,24 @@ const familyOf = (id: string): string => {
   const tag = id.indexOf(":");
   return tag === -1 ? id : id.slice(0, tag);
 };
+
+/** All-or-nothing cost adoption: the artifact's cost block is one claim
+ * ("these are the prices"), so a partial or malformed block adopts
+ * nothing — the model stays rateless ($0, the documented safe default),
+ * never a wrong price. output and cache_read accept 0: free tokens are a
+ * legitimate published rate. */
+function adoptCost(m: ArtifactModel): PricingRate | undefined {
+  const c = m.cost;
+  if (!c) return undefined;
+  if (!positiveFinite(c.input) || !nonnegativeFinite(c.output))
+    return undefined;
+  if (c.cache_read !== undefined && !nonnegativeFinite(c.cache_read)) {
+    return undefined;
+  }
+  const rate: PricingRate = { input: c.input, output: c.output };
+  if (c.cache_read !== undefined) rate.cachedInput = c.cache_read;
+  return rate;
+}
 
 /** Artifact entry → normalized CatalogModel. Only fields the plugin
  * consumes survive; everything else (peak_cost, parameter_count,
@@ -213,12 +284,8 @@ export function toCatalogModel(m: ArtifactModel): CatalogModel {
     releaseDate: m.release_date,
   };
   if (m.x_ollama?.quantization) model.quantization = m.x_ollama.quantization;
-  if (m.cost) {
-    model.cost = { input: m.cost.input, output: m.cost.output };
-    if (m.cost.cache_read !== undefined) {
-      model.cost.cachedInput = m.cost.cache_read;
-    }
-  }
+  const cost = adoptCost(m);
+  if (cost) model.cost = cost;
   return model;
 }
 
@@ -309,13 +376,14 @@ export async function loadCatalog(
     : DEFAULT_URLS;
   const doc = await loadValidated(urls, CACHE_FILE, isCatalog, opts);
   if (!doc) return null;
-  // isCatalog has already validated every entry's shape; normalization only
-  // projects the consumed fields. Pricing rides INSIDE the catalog (each
-  // entry's cost block) — a third-party catalog without cost fields simply
-  // normalizes rateless ($0), the rateless contract preserved.
+  // isCatalog guarantees the envelope only; usableModels gates each entry
+  // (decision models excluded, broken entries dropped) before
+  // normalization. Pricing rides INSIDE the catalog (each entry's cost
+  // block) — a costless or partially-costed entry normalizes rateless
+  // ($0), the rateless contract preserved.
   return {
     generatedAt: doc.x_ollama.generated_at,
     modelsHash: doc.x_ollama.models_hash,
-    models: Object.values(doc.provider.models).map(toCatalogModel),
+    models: usableModels(doc.provider.models),
   };
 }
