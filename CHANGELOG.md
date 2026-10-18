@@ -3,7 +3,7 @@
 Entries here follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [SemVer](https://semver.org/spec/v2.0.0.html).
 Each version also lives on the [releases page](https://github.com/srnoob2570/opencode-ollama-cloud/releases).
 
-## [Unreleased]
+## [0.1.13] - 2026-10-17 (df30057)
 
 ### Fixed
 
@@ -22,6 +22,8 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 ### Docs
 
 - The READMEs and `docs/research/soporte-v1-v2.md` no longer claim that V2 cannot load third-party TUI plugins. V2 loads them through the plugin registry: the package exposes `exports["./tui"]` and the module exports `{ id, setup }`.
+
+**Full changelog:** https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.12...v0.1.13
 
 ## [0.1.12] - 2026-09-23
 
