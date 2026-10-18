@@ -16,16 +16,28 @@ models.dev (la fuente de modelos de opencode) se actualiza manualmente por PR y 
 ## Inicio rápido
 
 ```bash
+opencode plugin add @srnoob2570/opencode-ollama-cloud
+```
+
+`opencode plugin add` instala el paquete y lo registra en tu config global. Para actualizar después usa `opencode plugin update` (`opencode plugin check` informa qué está desactualizado).
+
+En opencode 1.x (deprecado) el equivalente es:
+
+```bash
 opencode plugin @srnoob2570/opencode-ollama-cloud --force --global
 ```
 
-`--force` reemplaza una versión ya instalada. opencode no tiene comando de actualización de plugins, así que repetir este comando es la forma de actualizar. `--global` instala en `~/.config/opencode/opencode.json` en vez de en la config del proyecto.
+`--force` reemplaza una versión ya instalada; V1 no tiene comando de actualización de plugins, así que repetir este comando es la forma de actualizar. `--global` instala en `~/.config/opencode/opencode.json` en vez de en la config del proyecto.
 
-Eso es todo. Reinicia opencode y verifica:
+Eso es todo. Reinicia opencode (o recarga su configuración) y verifica la lista de modelos:
 
 ```bash
-opencode models ollama-cloud --refresh
+# opencode 2.x
+opencode reload                       # recarga config y plugins (vuelve a ejecutar el setup del catálogo)
+opencode models | grep '^ollama-cloud/'
 ```
+
+En un host V1 (deprecado) los comandos son otros: `opencode models ollama-cloud --refresh` lista y refresca en un solo paso. En V2, `opencode models` no acepta un proveedor como argumento — imprime todos los proveedores como `proveedor/modelo`, así que filtra la salida con `grep`.
 
 Deberías ver la lista live completa (ej. `ollama-cloud/glm-5.3-flash`), incluyendo modelos que models.dev aún no tiene.
 
@@ -159,8 +171,9 @@ siempre, y la entrada de la TUI va en `tui.json` en un host V1. Desde opencode
 `cli.json` carga la entrada server desde `main` y la de TUI desde
 `exports["./tui"]`.
 
-Para installs por npm, el comando del CLI registra ambas entradas de una vez
-(lee el `main` y `exports["./tui"]` del paquete y parchea ambas configs):
+En un host V1, para installs por npm, el comando del CLI registra ambas entradas
+de una vez (lee el `main` y `exports["./tui"]` del paquete y parchea ambas
+configs):
 
 ```bash
 opencode plugin @srnoob2570/opencode-ollama-cloud

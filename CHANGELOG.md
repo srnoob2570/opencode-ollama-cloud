@@ -3,6 +3,12 @@
 Entries here follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [SemVer](https://semver.org/spec/v2.0.0.html).
 Each version also lives on the [releases page](https://github.com/srnoob2570/opencode-ollama-cloud/releases).
 
+## [Unreleased]
+
+### Docs
+
+- The READMEs document the opencode V2 commands for installing the plugin and for refreshing and listing models: `opencode plugin add`, `opencode plugin update`, `opencode reload` and `opencode models` (filtered with `grep`). The V1-only commands remain documented as deprecated.
+
 ## [0.1.13] - 2026-10-17 (df30057)
 
 ### Fixed

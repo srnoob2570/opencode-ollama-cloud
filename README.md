@@ -15,16 +15,28 @@ models.dev (opencode's model source) is updated manually via PRs and goes stale.
 ## Quick start
 
 ```bash
+opencode plugin add @srnoob2570/opencode-ollama-cloud
+```
+
+`opencode plugin add` installs the package and registers it in your global config. To upgrade later use `opencode plugin update` (`opencode plugin check` reports what is outdated).
+
+On opencode 1.x (deprecated) the equivalent is:
+
+```bash
 opencode plugin @srnoob2570/opencode-ollama-cloud --force --global
 ```
 
-`--force` replaces an already-installed version. opencode has no plugin update command, so re-running this command is how you upgrade. `--global` installs into `~/.config/opencode/opencode.json` instead of a project-local config.
+`--force` replaces an already-installed version; V1 has no plugin update command, so re-running this command is how you upgrade. `--global` installs into `~/.config/opencode/opencode.json` instead of a project-local config.
 
-That's it. Restart opencode and check:
+That's it. Restart opencode (or reload its configuration) and check the model list:
 
 ```bash
-opencode models ollama-cloud --refresh
+# opencode 2.x
+opencode reload                       # reload config and plugins (re-runs the catalog setup)
+opencode models | grep '^ollama-cloud/'
 ```
+
+On a V1 host (deprecated) the commands differ: `opencode models ollama-cloud --refresh` lists and refreshes in one step. On V2, `opencode models` takes no provider argument — it prints every provider as `provider/model`, so filter the output with `grep`.
 
 You should see the full live list (e.g. `ollama-cloud/glm-5.3-flash`), including models models.dev doesn't have yet.
 
@@ -133,7 +145,7 @@ The average only counts the main conversation. Subagents, title generation and c
 
 On a V1 host the provider entry stays in `opencode.json`'s `plugin` array and the TUI entry goes in `tui.json`. Since opencode 1.18 the V1 TUI host loads plugins only from `~/.config/opencode/tui.json` (or the project's) and ignores `opencode.json`. On V2 the same package carries both entries: the registry in `cli.json` loads the server entry from `main` and the TUI entry from `exports["./tui"]`.
 
-For npm installs, the CLI command registers both entries in one step (it reads this package's `main` and `exports["./tui"]` and patches both configs):
+On a V1 host, for npm installs, the CLI command registers both entries in one step (it reads this package's `main` and `exports["./tui"]` and patches both configs):
 
 ```bash
 opencode plugin @srnoob2570/opencode-ollama-cloud
