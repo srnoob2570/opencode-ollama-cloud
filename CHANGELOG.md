@@ -5,9 +5,18 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 
 ## [Unreleased]
 
-### Docs
+### Removed
 
-- The READMEs document the opencode V2 commands for installing the plugin and for refreshing and listing models: `opencode plugin add`, `opencode plugin update`, `opencode reload` and `opencode models` (filtered with `grep`). The V1-only commands remain documented as deprecated.
+- **opencode V1 support.** The package now ships only the opencode 2.x entry (`{ id, setup }`); the classic `server` factory, the `deprecation` option and its notice log are gone. opencode 2.x is required.
+- **Streaming stats, TUI module and self-update.** The plugin no longer measures TTFT/TPS, renders a stats line or `/stats`, writes handoff files, auto-registers a TUI entry, or probes npm for updates — opencode 2.x owns stats, and `opencode plugin update` owns package updates. The `stats`, `statsDebug` and `tui` options are gone with them.
+- **Dependencies** `jsonc-parser`, `@opencode-ai/plugin`, `@opencode-ai/sdk` and `@opentui/solid`.
+
+### Changed
+
+- The plugin now has one responsibility: load the catalog and replace the provider's model list through `ctx.provider.transform` → `draft.models.set`, with the official rate in each record. The catalog loader (mirrors, cache, envelope gate, per-entry gate, all-or-nothing cost adoption) is unchanged.
+- `loadCatalog` returns the normalized models directly; the unused `Catalog` wrapper (`generatedAt`/`modelsHash`) is gone.
+- `CatalogModel` only keeps the fields the opencode 2.x record consumes. `family`, `quantization` and the raw `input` list no longer survive normalization.
+- `README.md` / `README.es.md` are opencode 2.x only: install, how it works, the three remaining options and pricing. The V1 instructions, support matrix, stats/TUI/self-update sections and their screenshots are gone.
 
 ## [0.1.13] - 2026-10-17 (df30057)
 

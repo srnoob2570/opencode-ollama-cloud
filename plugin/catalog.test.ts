@@ -20,7 +20,7 @@ const entry = (
   limit: { context: 1024 * 1024, output: 131072 },
   modalities: { input: ["text"] },
   release_date: "2026-08-14",
-  x_ollama: { quantization: "FP8", reasoning_options: ["low", "high"] },
+  x_ollama: { reasoning_options: ["low", "high"] },
   ...overrides,
 });
 
@@ -140,8 +140,6 @@ describe("usableModels", () => {
       { ...good, limit: { context: 65536, output: 0 } },
       { ...good, modalities: { input: "text" } },
       { ...good, reasoning: 1 },
-      { ...good, x_ollama: { quantization: "" } },
-      { ...good, x_ollama: { quantization: 8 } },
       { ...good, x_ollama: { reasoning_options: "low" } },
     ];
     for (const raw of cases) expect(usableModels({ bad: raw })).toEqual([]);
@@ -152,12 +150,12 @@ describe("usableModels", () => {
     expect(usableModels({ a: noName, b: noDate })).toEqual([]);
   });
 
-  test("absent x_ollama and unknown quantization formats stay usable (no enum)", () => {
+  test("absent x_ollama or extra metadata stays usable (only consumed shapes are gated)", () => {
     for (const raw of [
       { ...good, x_ollama: undefined },
       { ...good, x_ollama: {} },
-      { ...good, x_ollama: { quantization: "unknown" } },
       { ...good, x_ollama: { quantization: "Some-New-Format-2049" } },
+      { ...good, x_ollama: { some_future_field: 42 } },
     ]) {
       expect(usableModels({ m: raw })).toHaveLength(1);
     }
@@ -176,7 +174,7 @@ describe("usableModels decision exclusion", () => {
   test("excludes an otherwise valid entry marked decision: true", () => {
     const decision = entry("clef:27b", {
       limit: { context: 65536, output: 65536 },
-      x_ollama: { quantization: "BF16", decision: true },
+      x_ollama: { decision: true },
     });
     const models = usableModels(
       docWith([decision, entry("beam")]).provider.models,
@@ -191,7 +189,7 @@ describe("usableModels decision exclusion", () => {
       ...entry("clef:27b"),
       limit: { context: 65536 },
       cost: { input: 0.24 },
-      x_ollama: { quantization: "BF16", decision: true },
+      x_ollama: { decision: true },
     };
     const models = usableModels(
       docWith([clefMarked as unknown as ArtifactModel, entry("beam")]).provider
@@ -202,7 +200,7 @@ describe("usableModels decision exclusion", () => {
 
   test("a non-true decision value keeps a served-shape entry (tolerant read)", () => {
     const odd = entry("glm-5.3", {
-      x_ollama: { quantization: "FP8", decision: "yes" as unknown as boolean },
+      x_ollama: { decision: "yes" as unknown as boolean },
     });
     expect(usableModels(docWith([odd]).provider.models)).toHaveLength(1);
   });
@@ -210,11 +208,6 @@ describe("usableModels decision exclusion", () => {
 
 // The normalization seam: artifact entry → the plugin's internal view.
 describe("toCatalogModel", () => {
-  test("family is the id base (familia[:tag], CONTEXT.md vocabulary)", () => {
-    expect(toCatalogModel(entry("gpt-oss:120b")).family).toBe("gpt-oss");
-    expect(toCatalogModel(entry("glm-5.3")).family).toBe("glm-5.3");
-  });
-
   test("capabilities map from reasoning/tool_call/attachment+image modality", () => {
     expect(toCatalogModel(entry("glm-5.3")).capabilities).toEqual({
       tools: true,
@@ -240,13 +233,6 @@ describe("toCatalogModel", () => {
       x_ollama: { reasoning_options: ["low", 42, null, "high"] },
     });
     expect(toCatalogModel(dirty).reasoningOptions).toEqual(["low", "high"]);
-  });
-
-  test("quantization passes through raw (declared by Ollama)", () => {
-    expect(toCatalogModel(entry("glm-5.3")).quantization).toBe("FP8");
-    expect(
-      toCatalogModel(entry("gemma4:31b", { x_ollama: {} })).quantization,
-    ).toBeUndefined();
   });
 });
 

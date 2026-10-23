@@ -1,151 +1,89 @@
-import type { Plugin } from "@opencode-ai/plugin";
-import type { Model as ModelV2 } from "@opencode-ai/sdk/v2";
-import {
-  PROVIDER_CONFIG,
-  PROVIDER_ID,
-  loadCatalog,
-  type PluginOpts,
-} from "./catalog.ts";
-import { createStatsCapture, type FetchLike } from "./capture.ts";
-import { statsDebugSinkFor } from "./debug-sink.ts";
-import { toModelV2, zeroCost } from "./models.ts";
-import { ensureKnob, ensureTuiPlugin } from "./ensure-tui.ts";
-import { runSelfUpdate } from "./self-update.ts";
-import { pricingKnob } from "./tui-display.ts";
-import { setupV2 } from "./server-v2.ts";
-import { logDeprecatedV1 } from "./version.ts";
+// opencode 2.x entry: inject the live Ollama Cloud model list into the host
+// catalog. That is the plugin's whole job — the provider's models, with the
+// official rate in each record. opencode owns stats, the TUI and package
+// updates, so none of that is wired here.
+//
+// Contract: silent degradation — a moved/missing plugin API retires the
+// feature, never the host's boot. The transform is registered only after the
+// catalog loads, because registering it TAKES OWNERSHIP of the provider's
+// model set (models.dev entries stop being merged); on catalog failure nothing
+// is registered and the host's models.dev fallback stays alive.
+import { loadCatalog, PROVIDER_ID, type PluginOpts } from "./catalog.ts";
+import { toModelRecord, type ModelRecord } from "./models.ts";
 
-// NOTE: export ONLY the dual entry shape from this module. opencode's legacy
-// plugin path (packages/opencode/src/plugin/index.ts, getLegacyPlugins) calls
-// EVERY exported function of a plugin module as a plugin factory with
-// (PluginInput, options) whenever the default export is a function — the dual
-// object default below is its PluginModule shape, so v1 reads `.server` and
-// v2 validates `id + setup`. Either way, an extra exported function here is
-// still fair game as a factory on v1: one once crashed the whole load
-// (createStatsDebugSink received the PluginInput object as `dir` and threw
-// inside node:path join, killing the plugin before `default` ever ran) and
-// another threw after registration (the old toModelV2 error).
-// toModelV2/zeroCost live in ./models.ts and the statsDebug sink in
-// ./debug-sink.ts — import them from there.
-
-// Pricing knob (opt-out): default on — the rate is the OFFICIAL Ollama Cloud
-// tariff (the public rate card), so only `off` turns it off. Legacy configs
-// saying "reference" (the old opt-in) keep pricing on, never accidentally off.
-const opencodeOllamaCloud: Plugin = async (input, options) => {
-  const pricing: "off" | "on" = pricingKnob(options?.pricing);
-  // Stats knob (ticket 08): default ON — opt-out, the mirror of pricing. In
-  // "off" the plugin behaves exactly as before the stats effort: no fetch
-  // wrap, no event sink, no handoff, zero overhead.
-  const stats: "on" | "off" = options?.stats === "off" ? "off" : "on";
-  const opts: PluginOpts = {
-    catalogUrl:
-      typeof options?.catalogUrl === "string" ? options.catalogUrl : undefined,
-    timeoutMs:
-      typeof options?.timeoutMs === "number" ? options.timeoutMs : undefined,
+/** The slice of the opencode 2.x PluginContext this module touches. */
+interface PluginContext {
+  options?: Record<string, unknown>;
+  provider?: {
+    transform?: (cb: (draft: ProviderDraft) => unknown) => unknown;
   };
+}
 
-  // V1 deprecation notice (owner decision: silent — one line in the plugin's
-  // own debug log, never on screen). This factory only runs on opencode 1.x
-  // hosts, so no version detection is needed — presence here means v1.
-  logDeprecatedV1(options?.deprecation);
-
-  const { id: _id, ...providerConfig } = PROVIDER_CONFIG;
-  // Stats capture (spec Pieza 1): wire wrapper for ollama-cloud + claim
-  // correlation sink. All failure paths live inside the capture; nothing here
-  // may throw. In "off" mode the capture is never created and the hooks below
-  // simply leave the plugin as it was before the stats effort.
-  const capture =
-    stats === "on"
-      ? createStatsCapture({
-          debugSink: statsDebugSinkFor(options?.statsDebug),
-        })
-      : null;
-
-  // Self-update check (precedent: @tarquinen/opencode-dcp): fire-and-forget on
-  // every boot, independent of the stats knob — it is plugin infrastructure,
-  // not stats. runSelfUpdate never throws and no-ops (clearing a stale
-  // update.json) when the plugin runs from the repo (dev install).
-  void runSelfUpdate({ moduleUrl: import.meta.url, client: input.client });
-
-  // Opt-in TUI registration (tui: "ensure"): the TUI host only reads its
-  // plugin list from tui.json and nothing upstream writes it for an npm
-  // install, so with the knob on the server entry — which always loads —
-  // registers the TUI entry itself. Idempotent, comment-preserving, dev is a
-  // no-op; the change takes effect on the next TUI launch.
-  if (ensureKnob(options?.tui) === "ensure")
-    void ensureTuiPlugin({ moduleUrl: import.meta.url });
-
-  return {
-    ...(capture
-      ? {
-          event: ({ event }: { event: unknown }) => capture.handleEvent(event),
-        }
-      : {}),
-    config: async (cfg) => {
-      cfg.provider ??= {};
-      const provider = (cfg.provider[PROVIDER_ID] ??= { ...providerConfig });
-      if (!capture) return;
-      // opencode honors a provider `options.fetch` (its seam wraps it with
-      // timeouts and passes the signal through). We wrap AROUND any existing
-      // custom fetch (proxy/CA/agent) instead of clobbering it — only SSE
-      // chat calls get measured, everything else flows through untouched.
-      const providerWithOptions = provider as {
-        options?: Record<string, unknown>;
-      };
-      const userFetch = (providerWithOptions.options?.fetch ??
-        null) as FetchLike | null;
-      providerWithOptions.options = {
-        ...providerWithOptions.options,
-        fetch: (input: RequestInfo | URL, init?: RequestInit) =>
-          capture.wireFetch(input, init, userFetch ?? undefined),
-      };
-    },
-    provider: {
-      id: PROVIDER_ID,
-      models: async (provider) => {
-        try {
-          // The official rate lives INSIDE the catalog (each entry's cost
-          // block, off-peak): one fetch, one contract. A missing or partial
-          // cost block just leaves those models at $0 — never a wrong price.
-          // With the knob off the counter is zeroed downstream, at no extra
-          // fetch cost (the catalog is the provider source either way).
-          const catalog = await loadCatalog(opts);
-          if (catalog) {
-            // Entries were already validated and normalized by loadCatalog.
-            const models: Record<string, ModelV2> = {};
-            for (const m of catalog.models)
-              models[m.id] = toModelV2(m, pricing);
-            if (Object.keys(models).length > 0) return models;
-          }
-          console.warn(
-            "[opencode-ollama-cloud] no usable catalog, falling back to models.dev models",
-          );
-        } catch (err) {
-          console.warn(
-            "[opencode-ollama-cloud] catalog load failed, falling back to models.dev models:",
-            err,
-          );
-        }
-        // Passthrough: models.dev's ollama-cloud entries carry no cost today,
-        // but the official-rate contract holds regardless — a model without
-        // OUR pricing table never shows a cost, even if models.dev attaches
-        // one later (cost here means the Ollama Cloud rate, not their number).
-        const models: Record<string, ModelV2> = {};
-        for (const [id, model] of Object.entries(provider.models))
-          models[id] = { ...model, cost: zeroCost() };
-        return models;
-      },
-    },
+/** The slice of the provider draft the transform receives. */
+export interface ProviderDraft {
+  get?: (id: string) => { provider?: unknown } | null | undefined;
+  models?: {
+    set?: (providerID: string, models: ModelRecord[]) => unknown;
   };
-};
+}
 
-// Dual-host entry (docs/research/soporte-v1-v2.md): opencode v1 reads `.server`
-// from an object default (its PluginModule shape — same as @opencode-ai/plugin
-// documents and as @tarquinen/opencode-dcp ships), while v2 validates
-// `id + setup` and runs setup(ctx) with the v2 PluginContext, ignoring
-// `.server`. One module, both hosts; which code runs IS the generation.
+const asString = (v: unknown): string | undefined =>
+  typeof v === "string" ? v : undefined;
+const asNumber = (v: unknown): number | undefined =>
+  typeof v === "number" ? v : undefined;
+
+/** Pricing knob: the official rate is the default, only "off" disables it.
+ * Legacy `"reference"` configs (the old opt-in) stay on. */
+export const pricingKnob = (value: unknown): "off" | "on" =>
+  value === "off" ? "off" : "on";
+
+/**
+ * Transform body, exported for tests: set() on a provider the catalog doesn't
+ * know would be a silent no-op at best, so only inject when the provider
+ * record exists (it comes from models.dev today; a missing one is the host's
+ * problem). A throw here must never break the host's boot.
+ */
+export function applyModels(
+  draft: ProviderDraft | null | undefined,
+  records: ModelRecord[],
+): void {
+  try {
+    if (typeof draft?.get !== "function") return;
+    if (!draft.get(PROVIDER_ID)) return;
+    draft.models?.set?.(PROVIDER_ID, records);
+  } catch {
+    /* one bad transform call must never break the host's boot */
+  }
+}
+
+async function setup(ctx: unknown): Promise<void> {
+  try {
+    const c = ctx as PluginContext | null | undefined;
+    const registerTransform = c?.provider?.transform;
+    if (typeof registerTransform !== "function") {
+      // the runtime moved on again: nothing to register through
+      return;
+    }
+    const options = (c?.options ?? {}) as Record<string, unknown>;
+    const pricing = pricingKnob(options.pricing);
+    const opts: PluginOpts = {
+      catalogUrl: asString(options.catalogUrl),
+      timeoutMs: asNumber(options.timeoutMs),
+    };
+
+    const models = await loadCatalog(opts);
+    if (!models || models.length === 0) return;
+    const records = models.map((m) => toModelRecord(m, pricing));
+
+    // the transform runs several times per boot: the records are already
+    // mapped once here, so each invocation is just the set() call
+    registerTransform((draft: ProviderDraft) => applyModels(draft, records));
+  } catch {
+    /* silent degradation: a host must still boot the plugin cleanly */
+  }
+}
+
 export default {
   id: "opencode-ollama-cloud",
-  setup: setupV2,
-  server: opencodeOllamaCloud,
+  setup,
 };

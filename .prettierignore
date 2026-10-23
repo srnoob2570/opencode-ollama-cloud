@@ -1,3 +1,0 @@
-# Generado por `bun run build:tui` (bun build). No reformatear a mano:
-# se regenera en el hook build-tui y se commitea como artefacto.
-plugin/tui.js

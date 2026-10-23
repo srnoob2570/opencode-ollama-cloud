@@ -2,9 +2,5 @@
 
 ## Términos
 
-- **Familia / `family`**: la base de un id de modelo (`familia[:tag]`), sin la parte del tag. `family` es el vocabulario canónico (campo de `CatalogModel`); el alias "base" quedó descartado el 2026-08-31 y el código legacy que lo usa converge a `family` (SIMPL-011).
-- **LLM step**: cada completion streaming individual dentro de un turno del asistente (tool calls, reintentos y compaction incluidos). Unidad de medición del streaming: TTFT/TPS se miden por step, no por vuelta del asistente.
-- **TTFT (time to first token)**: latencia hasta el primer token de un LLM step — tiempo desde el envío del request hasta el primer token.
-- **TPS (de decodificación)**: tokens de salida del step (reasoning incluido) por segundo de decodificación — entre el primer token y el fin del stream; no penaliza el TTFT.
-- **Promedio de sesión**: métrica agregada en vivo del chat principal, sin desglose por modelo ni reset al cambiar de modelo: TPS ponderado por tokens (tokens totales de salida ÷ tiempo total de decodificación) y TTFT como media simple por step. No persiste entre sesiones.
-- **Cuantización**: metadato declarativo que Ollama expone del modelo servido (`file_type` del registry, `quantization_level` de `/api/show`). No es garantía del build ni de la precisión efectiva de la inferencia remota. Sin fuente defendible → el valor canónico es `unknown`, nunca se inventa.
+- **Catálogo**: el artifact `catalog.json` publicado por `srnoob2570/ollama-cloud-catalog` — forma de models.dev más la extensión `x_ollama`. El plugin lo consume tal cual: no lo construye, y su gate de runtime es `isCatalog` (envelope) + `usableModels` (entrada por entrada).
+- **Coste oficial**: la tarifa de Ollama Cloud (USD por 1M de tokens, off-peak) que viaja en el bloque `cost` de cada entrada del catálogo. Es el precio por defecto del contador de opencode; `pricing: "off"` lo apaga. Sin bloque completo, el modelo queda rateless ($0), nunca con un precio inventado.

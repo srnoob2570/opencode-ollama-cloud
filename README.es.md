@@ -6,12 +6,16 @@
 
 [Read in English →](README.md)
 
-Plugin de [opencode](https://opencode.ai) que registra el proveedor **Ollama Cloud** con una lista de modelos siempre actualizada, tomada en vivo de `https://ollama.com/v1/models`.
+Plugin de [opencode](https://opencode.ai) 2.x que le da al proveedor **Ollama Cloud** una lista de modelos siempre actualizada, tomada en vivo de `https://ollama.com/v1/models`, con la tarifa oficial adjunta a cada modelo.
 
 models.dev (la fuente de modelos de opencode) se actualiza manualmente por PR y se queda desactualizado. Este plugin consume un catálogo estático mantenido por GitHub Actions, así que los modelos nuevos aparecen sin esperar a nadie.
 
 > [!NOTE]
 > **Transparencia:** este plugin y esta documentación fueron generados y son mantenidos con asistencia de IA ([opencode](https://opencode.ai)). Revisa el código antes de confiar en él para algo sensible.
+
+## Requisitos
+
+- opencode 2.x. Este plugin solo trae la entrada de opencode 2.x (`{ id, setup }`); opencode 1.x ya no está soportado.
 
 ## Inicio rápido
 
@@ -19,25 +23,14 @@ models.dev (la fuente de modelos de opencode) se actualiza manualmente por PR y 
 opencode plugin add @srnoob2570/opencode-ollama-cloud
 ```
 
-`opencode plugin add` instala el paquete y lo registra en tu config global. Para actualizar después usa `opencode plugin update` (`opencode plugin check` informa qué está desactualizado).
+`opencode plugin add` instala el paquete y lo registra en tu config. Para actualizar después usa `opencode plugin update` (`opencode plugin check` informa qué está desactualizado).
 
-En opencode 1.x (deprecado) el equivalente es:
-
-```bash
-opencode plugin @srnoob2570/opencode-ollama-cloud --force --global
-```
-
-`--force` reemplaza una versión ya instalada; V1 no tiene comando de actualización de plugins, así que repetir este comando es la forma de actualizar. `--global` instala en `~/.config/opencode/opencode.json` en vez de en la config del proyecto.
-
-Eso es todo. Reinicia opencode (o recarga su configuración) y verifica la lista de modelos:
+Reinicia opencode (o recarga su configuración) y verifica la lista de modelos:
 
 ```bash
-# opencode 2.x
 opencode reload                       # recarga config y plugins (vuelve a ejecutar el setup del catálogo)
 opencode models | grep '^ollama-cloud/'
 ```
-
-En un host V1 (deprecado) los comandos son otros: `opencode models ollama-cloud --refresh` lista y refresca en un solo paso. En V2, `opencode models` no acepta un proveedor como argumento — imprime todos los proveedores como `proveedor/modelo`, así que filtra la salida con `grep`.
 
 Deberías ver la lista live completa (ej. `ollama-cloud/glm-5.3-flash`), incluyendo modelos que models.dev aún no tiene.
 
@@ -51,74 +44,36 @@ Deberías ver la lista live completa (ej. `ollama-cloud/glm-5.3-flash`), incluye
 flowchart LR
   A["ollama.com<br>/v1/models · /api/show · /pricing"] --> B["ollama-cloud-catalog<br>GitHub Actions · hash-gated"]
   B --> C["catalog.json<br>jsDelivr · raw · auto-commit"]
-  C --> D["opencode-ollama-cloud<br>fallback: cache · models.dev"]
-  D --> E["opencode"]
+  C --> D["opencode-ollama-cloud<br>setup(ctx)"]
+  D --> E["opencode<br>provider model list"]
 ```
 
 **Upstream** ([srnoob2570/ollama-cloud-catalog](https://github.com/srnoob2570/ollama-cloud-catalog)): GitHub Actions construyen y publican `catalog.json` — un documento con la forma de models.dev más la extensión `x_ollama`. El build está compuertizado por el hash de `/v1/models` (un cambio en `{id, created}` dispara la re-extracción completa), las specs vienen de `/api/show` de Ollama y la rate card se parsea con un LLM hacia el bloque `cost` de cada entrada. Fail-loud por contrato: un scrape que falla aborta en vez de publicar un catálogo degradado.
 
-**Plugin** (`plugin/index.ts`): hook `config` registra el provider (idempotente) y hook `provider` devuelve los modelos normalizados al schema de opencode, con cascada de fallback:
+**Plugin** (`plugin/index.ts`): `setup(ctx)` carga el catálogo y registra `ctx.provider.transform`. En cada llamada al transform, el set de modelos del proveedor se reemplaza por los modelos del catálogo, con la tarifa oficial en cada registro. La cascada de fuentes del catálogo es:
 
 1. Catálogo remoto (jsDelivr → raw.githubusercontent.com)
 2. Cache local en `~/.cache/opencode-ollama-cloud/catalog.json`
-3. Passthrough de models.dev (los modelos que opencode ya tiene)
+3. Sin transform — el host conserva sus propios modelos de models.dev
 
-## Soporte opencode V1 / V2
+Registrar un `provider.transform` **toma propiedad** de la lista de modelos del proveedor: una vez registrado el transform del plugin, opencode deja de mezclar las entradas `ollama-cloud` de models.dev. El plugin solo registra el transform después de que el catálogo carga con al menos un modelo — si el catálogo falla, el fallback de models.dev sigue vivo.
 
-El plugin trae una **entrada dual** que ambas generaciones del host cargan de forma nativa — un módulo, sin detección de versión:
-
-- **opencode 1.x (V1)**: corre el factory `server` clásico (hooks `config`/`provider`/`event`), registra el provider y devuelve los modelos del catálogo, cablea la captura de stats y (opt-in) el auto-registro TUI. **El soporte V1 está deprecado**: en un host V1 el plugin escribe una línea silenciosa en `~/.cache/opencode-ollama-cloud/deprecation.log` por arranque. Silénciala con la opción `deprecation: "off"`.
-- **opencode 2.x (V2)**: valida el `id + setup` del módulo y corre `setup(ctx)` contra el contexto de plugin v2, inyectando el catálogo (con tarifa oficial) vía `ctx.provider.transform` → `draft.models.set`. El registro de plugins v2 se gestiona con `opencode plugin add/check/update/remove`.
-
-Diferencias por host (verificado contra opencode 2.0.15 — detalle en `docs/research/soporte-v1-v2.md`):
-
-| Función                                                | V1 (1.18.x)             | V2 (2.0.x)                                                                     |
-| ------------------------------------------------------ | ----------------------- | ------------------------------------------------------------------------------ |
-| Catálogo + tarifa oficial                              | ✅ hook `provider`      | ✅ `provider.transform`                                                        |
-| Captura de stats (línea TTFT/TPS, `/stats`)            | ✅                      | ❌ 2.0.15 no expone seam de fetch ni bus de eventos para plugins               |
-| Módulo TUI (línea de stats, `/stats`, badge de update) | ✅ vía `tui.json`       | ✅ vía el registro de plugins; los números en vivo aún requieren la captura V1 |
-| Self-update (evicción + toast/badge)                   | ✅                      | ❌ el propio host gestiona updates con `opencode plugin update`                |
-| Aviso de deprecación                                   | línea silenciosa de log | n/a (V2 es la generación actual)                                               |
-
-Registrar un `provider.transform` **toma propiedad** de la lista de modelos del provider: una vez registrado el transform del plugin, opencode deja de mezclar las entradas `ollama-cloud` de models.dev. El plugin solo registra el transform cuando el catálogo carga con al menos un modelo — si el catálogo falla, el fallback a models.dev queda vivo.
-
-## Instalación manual
-
-¿Prefieres editar la config a mano? Agrega el plugin a `~/.config/opencode/opencode.json`:
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@srnoob2570/opencode-ollama-cloud"]
-}
-```
-
-### Local (desde un clon de este repo)
-
-```json
-{
-  "plugin": ["/ruta/a/opencode-ollama-cloud/plugin/index.ts"]
-}
-```
-
-### Opciones
+## Opciones
 
 ```json
 {
   "plugin": [
     [
       "@srnoob2570/opencode-ollama-cloud",
-      { "catalogUrl": "https://mi-cdn/catalog.json" }
+      { "catalogUrl": "https://my-cdn/catalog.json" }
     ]
   ]
 }
 ```
 
 - `catalogUrl`: URL alternativa del catálogo (se intenta primero).
-- `timeoutMs`: timeout de cada fetch (default `5000`).
-- `pricing`: `"on"` (default) o `"off"`. Controla si el contador de costos de opencode muestra la tarifa oficial de Ollama Cloud. `pricing: "reference"` (el valor viejo opt-in) sigue funcionando y significa `"on"`.
-- `tui`: `"ensure"` (opt-in, default off). La entrada server registra ella misma la entrada TUI parcheando el tui.json que opencode va a leer (`$OPENCODE_TUI_CONFIG` si está seteado, si no el global). Idempotente, preserva comentarios, surte efecto en el próximo arranque de la TUI. Instalaciones dev (rutas del repo) jamás parchean nada. Solo V1, porque solo el host V1 lee `tui.json`. En V2 registra el paquete con `opencode plugin add`; el host carga el módulo TUI desde `exports["./tui"]` por su cuenta.
-- `deprecation`: `"on"` (default) o `"off"`. En un host V1, escribe el aviso silencioso de deprecación en `~/.cache/opencode-ollama-cloud/deprecation.log`. `"off"` lo silencia. Sin efecto bajo V2.
+- `timeoutMs`: timeout por fetch (default `5000`).
+- `pricing`: `"on"` (default) u `"off"`. Controla si el contador de coste de la sesión de opencode muestra la tarifa oficial de Ollama Cloud. `pricing: "reference"` (el valor opt-in viejo) sigue funcionando y significa `"on"`.
 
 ```json
 {
@@ -126,108 +81,13 @@ Registrar un `provider.transform` **toma propiedad** de la lista de modelos del 
 }
 ```
 
-El catálogo trae la tarifa oficial de Ollama Cloud por modelo: precios de input, cached input y output en USD por 1M de tokens, extraídos de la [rate card](https://ollama.com/pricing) pública de Ollama y embebidos en el bloque `cost` de cada entrada del catálogo. Es lo que tus créditos pagan de verdad por token, así que el contador de costos de opencode la muestra por defecto (`pricing: "off"` la apaga). Los modelos sin tarifa quedan en $0.
+El catálogo trae la tarifa oficial de Ollama Cloud por modelo: precios de input, input cacheado y output en USD por 1M de tokens, tomados de la [rate card](https://ollama.com/pricing) pública de Ollama hacia el bloque `cost` de cada entrada (tarifas off-peak; los recargos peak quedan bajo `x_ollama.peak_cost`). Eso es lo que tus créditos pagan realmente por token, así que el contador de coste de opencode lo muestra por defecto (`pricing: "off"` lo apaga). Los modelos sin tarifa quedan en $0.
 
-Actualizar la tabla es trabajo del repo upstream ([ollama-cloud-catalog](https://github.com/srnoob2570/ollama-cloud-catalog)): su workflow `update-pricing` corre semanalmente (y bajo demanda) y reescribe el artifact con verificación de cobertura bidireccional — si la página y el catálogo no cuadran (un modelo nuevo o retirado), aborta sin escribir nada. Los picos de tarifa quedan documentados en la extensión `x_ollama` del artifact; el plugin muestra siempre la tarifa estándar.
-
-## Estadísticas de streaming
-
-El plugin mide lo que opencode no guarda: TTFT (tiempo hasta el primer
-token) y tokens/s de cada LLM step, del lado del cliente. En `ollama-cloud`
-los números tienen precisión de wire porque el plugin envuelve el `fetch` del
-provider y lee el chunk final de `usage` que opencode ya pide; para cualquier
-otro proveedor los deriva de los eventos de opencode. Muestra el promedio de
-la sesión en el lado derecho de la fila del prompt (la fila del nombre del
-modelo), una fila arriba de la línea de contexto/costo de opencode. Las
-métricas son de la sesión, no del modelo activo: sin desglose por modelo ni
-reset al cambiar.
-
-![Línea de stats viva en la fila del prompt](docs/img/stats.png)
-
-La línea de la derecha es del plugin: `197.0 tok/s · TTFT 1298 ms · Session
-average`. El conteo de tokens y el costo que se ven debajo (`26.0K (2%) ·
-$0.01`) son el contador propio de opencode, una línea aparte que el plugin no
-toca.
-
-- `/stats`. Resumen de sesión y últimas respuestas (detalle por step; las
-  filas `wire` y `event` son distinguibles).
-
-![El diálogo /stats con el promedio de sesión y las respuestas recientes](docs/img/stats_command.png)
-
-El promedio solo cuenta el chat principal. Subagentes, titlegen y compaction
-jamás entran (señales verificadas contra el código de opencode). Los números
-viven en memoria por sesión; no se persiste nada ni sale nada de tu máquina.
-La UI de stats es una segunda entrada de plugin y degrada en silencio. En un
-build de opencode donde la API TUI cambió, provider/catálogo siguen
-funcionando y las stats simplemente desaparecen (probado contra opencode
-1.18.27; la API que usa existe pero no está documentada, así que la UI de
-stats es best-effort hasta que upstream la documente).
-
-La entrada del provider vive en el array `plugin` de `opencode.json`, como
-siempre, y la entrada de la TUI va en `tui.json` en un host V1. Desde opencode
-1.18 el host TUI V1 solo carga sus plugins desde
-`~/.config/opencode/tui.json` (o el del proyecto) e ignora el array `plugin` de
-`opencode.json`. En V2 el mismo paquete lleva ambas entradas: el registro de
-`cli.json` carga la entrada server desde `main` y la de TUI desde
-`exports["./tui"]`.
-
-En un host V1, para installs por npm, el comando del CLI registra ambas entradas
-de una vez (lee el `main` y `exports["./tui"]` del paquete y parchea ambas
-configs):
-
-```bash
-opencode plugin @srnoob2570/opencode-ollama-cloud
-```
-
-Alternativas: setear `tui: "ensure"` en la entrada server (Opciones arriba) y
-dejar que el plugin parchee `tui.json` al arrancar, o editar el archivo a mano
-como abajo.
-
-opencode.json:
-
-```json
-{
-  "plugin": [["@srnoob2570/opencode-ollama-cloud", {}]]
-}
-```
-
-~/.config/opencode/tui.json (una ruta de archivo directa es la forma
-verificada; con instalación por npm, apúntala al `tui.tsx` dentro del paquete
-instalado):
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["/ruta/absoluta/a/opencode-ollama-cloud/plugin/tui.tsx"]
-}
-```
-
-En V2 no edites `tui.json`. `opencode plugin add @srnoob2570/opencode-ollama-cloud`
-escribe el registro, y el host resuelve el módulo TUI desde el
-`exports["./tui"]` del paquete, que apunta al precompilado `plugin/tui.js`.
-
-- `stats`: `"on"` (default) o `"off"`. Ponlo en ambas entradas (forma de
-  tupla, p. ej. `["…", { "stats": "off" }]`) y todo se apaga: sin medición,
-  sin UI, exactamente el plugin de siempre.
-
-### Auto-actualización
-
-En cada arranque la entrada server hace un lookup al registry de npm. Si hay
-release más nueva y el plugin vino instalado por npm con un spec sin fijar,
-deja la actualización preparada igual que `@tarquinen/opencode-dcp`. Borra el
-wrapper cacheado bajo `~/.cache/opencode/packages/` para que opencode
-reinstale la última al siguiente inicio, muestra un toast ("Updated … Restart
-opencode to finish.") y la TUI muestra un badge `↑ <versión>` sobre la línea
-de stats hasta consumir el update. Installs dev (repo) y specs fijados
-(`…@0.1.8`) jamás se tocan. Un lookup fallido se ignora (timeout de 10 s,
-fail-silent).
-
-La idea de las stats de streaming la propuso el usuario de GitHub
-[@adilfaisal01](https://github.com/adilfaisal01).
+Las tarifas las refresca el workflow programado del repo del catálogo (semanal, más manual). Si la rate card y el catálogo no coinciden (un modelo nuevo o retirado), la actualización aborta con un reporte y no escribe nada.
 
 ## Desarrollo
 
-Este repo ya no genera el catálogo: vive en [srnoob2570/ollama-cloud-catalog](https://github.com/srnoob2570/ollama-cloud-catalog) (Bun + TypeScript, compuertizado por hash, fail-loud).
+El catálogo y su updater viven en [srnoob2570/ollama-cloud-catalog](https://github.com/srnoob2570/ollama-cloud-catalog). Este repo es solo el consumidor:
 
 ```bash
 bun install
@@ -235,9 +95,9 @@ bun test
 bun run typecheck
 ```
 
-## Cambios
+## Changelog
 
-Cada versión tiene su entrada en [CHANGELOG.md](CHANGELOG.md) (en inglés) y su [release en GitHub](https://github.com/srnoob2570/opencode-ollama-cloud/releases). Las ramas de release están en `release/v*`.
+Cada versión tiene su entrada en [CHANGELOG.md](CHANGELOG.md) y su propio [GitHub release](https://github.com/srnoob2570/opencode-ollama-cloud/releases). Las ramas de release viven bajo `release/v*`.
 
 ## Licencia
 

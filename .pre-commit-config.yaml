@@ -24,14 +24,4 @@ repos:
         entry: bun run typecheck
         language: system
         pass_filenames: false
-        files: \.tsx?$
-
-      # plugin/tui.js es un artefacto generado que se publica: lo commiteamos
-      # ya compilado porque el workflow de publish no tiene paso de build.
-      # Regenerarlo aquí cuando cambie la fuente.
-      - id: build-tui
-        name: build tui.js (bun build)
-        entry: bun run build:tui
-        language: system
-        pass_filenames: false
-        files: ^plugin/tui\.tsx$
+        files: \.ts$

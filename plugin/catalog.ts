@@ -4,43 +4,17 @@ import { dirname, join } from "node:path";
 
 export const PROVIDER_ID = "ollama-cloud";
 
-/** Single source of truth for the provider identity. Deliberately decoupled
- * from the artifact: a third-party catalog (custom catalogUrl) carries its
- * own provider block, and the plugin must never adopt it. */
-export interface ProviderConfig {
-  id: string;
-  name: string;
-  api: string;
-  npm: string;
-  env: string[];
-}
-
-export const PROVIDER_CONFIG: ProviderConfig = {
-  id: PROVIDER_ID,
-  name: "Ollama Cloud",
-  api: "https://ollama.com/v1",
-  npm: "@ai-sdk/openai-compatible",
-  env: ["OLLAMA_API_KEY"],
-};
-
 /** Normalized catalog model — the plugin's internal view, independent of the
- * artifact's shape. `family` is the id base (familia[:tag], CONTEXT.md
- * vocabulary); the registry ollama_family stays inside the artifact. */
+ * artifact's shape. Only the fields the opencode model record consumes
+ * survive normalization. */
 export interface CatalogModel {
   id: string;
   name: string;
-  family: string;
   capabilities: { tools: boolean; thinking: boolean; vision: boolean };
-  input: string[];
   context: number;
   maxOutput: number;
   reasoningOptions: string[];
   releaseDate: string;
-  /** Raw quantization Ollama declares for the served model (/api/show
-   * quantization_level) — or the literal "unknown". DECLARATIVE metadata,
-   * never a guarantee of remote inference precision. No closed enum: a new
-   * Ollama format must not break the loader. */
-  quantization?: string;
   /** Official Ollama Cloud rate (USD per 1M tokens) from the artifact's
    * cost block — what the credits actually pay (off-peak rates; peak rates
    * live under the artifact's x_ollama.peak_cost and are not shown). */
@@ -55,19 +29,11 @@ export interface PricingRate {
   cachedInput?: number;
 }
 
-export interface Catalog {
-  generatedAt: string;
-  modelsHash: string;
-  models: CatalogModel[];
-}
-
 export interface PluginOpts {
   catalogUrl?: string;
   timeoutMs?: number;
 }
 
-/** The published artifact (models.dev shape plus the x_ollama extension),
- * the loader's view before normalization. */
 /** The served shape of one artifact entry — the loader's view AFTER the
  * per-entry gate (usableModels) has passed it. Wire optionality the gate
  * does not enforce stays in the types: the cost fields (adoption is
@@ -91,7 +57,6 @@ export interface ArtifactModel {
   modalities: { input: string[] };
   release_date: string;
   x_ollama?: {
-    quantization?: string;
     reasoning_options?: unknown[];
     /** True only on decision models (served via /v1/systemone, not
      * /api/chat). The artifact's marker is the contract: usableModels
@@ -203,15 +168,13 @@ function usableEntry(raw: unknown): raw is ArtifactModel {
     typeof limit?.output === "number" &&
     limit.output >= 1 &&
     isStringArray(modalities?.input) &&
-    // consumed downstream as ModelV2.release_date, a required string
+    // consumed downstream as the record's release date, a required string
     isNonEmptyString(m.release_date) &&
     (x === undefined ||
-      ((x.quantization === undefined ||
-        (typeof x.quantization === "string" && x.quantization.length > 0)) &&
-        // shape-only: non-string entries are dropped by the adapter so
-        // garbage effort keys never reach the TUI picker or a 400 upstream
-        (x.reasoning_options === undefined ||
-          Array.isArray(x.reasoning_options))))
+      // shape-only: non-string entries are dropped by the adapter so garbage
+      // effort keys never reach the model record or a 400 upstream
+      x.reasoning_options === undefined ||
+      Array.isArray(x.reasoning_options))
   );
 }
 
@@ -237,12 +200,6 @@ export function usableModels(models: Record<string, unknown>): CatalogModel[] {
   return usable;
 }
 
-/** Catalog family = id base (familia[:tag], CONTEXT.md vocabulary). */
-const familyOf = (id: string): string => {
-  const tag = id.indexOf(":");
-  return tag === -1 ? id : id.slice(0, tag);
-};
-
 /** All-or-nothing cost adoption: the artifact's cost block is one claim
  * ("these are the prices"), so a partial or malformed block adopts
  * nothing — the model stays rateless ($0, the documented safe default),
@@ -263,19 +220,18 @@ function adoptCost(m: ArtifactModel): PricingRate | undefined {
 
 /** Artifact entry → normalized CatalogModel. Only fields the plugin
  * consumes survive; everything else (peak_cost, parameter_count,
- * ollama_family, modalities.output) stays in the artifact. Exported as the
- * normalization seam (tests + a custom loader could reuse it). */
+ * ollama_family, quantization, modalities.output) stays in the artifact.
+ * Exported as the normalization seam (tests + a custom loader could reuse
+ * it). */
 export function toCatalogModel(m: ArtifactModel): CatalogModel {
   const model: CatalogModel = {
     id: m.id,
     name: m.name,
-    family: familyOf(m.id),
     capabilities: {
       tools: m.tool_call,
       thinking: m.reasoning,
       vision: m.attachment || m.modalities.input.includes("image"),
     },
-    input: m.modalities.input,
     context: m.limit.context,
     maxOutput: m.limit.output,
     reasoningOptions: (m.x_ollama?.reasoning_options ?? []).filter(
@@ -283,7 +239,6 @@ export function toCatalogModel(m: ArtifactModel): CatalogModel {
     ),
     releaseDate: m.release_date,
   };
-  if (m.x_ollama?.quantization) model.quantization = m.x_ollama.quantization;
   const cost = adoptCost(m);
   if (cost) model.cost = cost;
   return model;
@@ -368,7 +323,7 @@ async function loadValidated<T>(
 
 export async function loadCatalog(
   opts: PluginOpts = {},
-): Promise<Catalog | null> {
+): Promise<CatalogModel[] | null> {
   // A user-configured URL keeps documented priority ("tried first") over
   // the defaults.
   const urls = opts.catalogUrl
@@ -381,9 +336,5 @@ export async function loadCatalog(
   // normalization. Pricing rides INSIDE the catalog (each entry's cost
   // block) — a costless or partially-costed entry normalizes rateless
   // ($0), the rateless contract preserved.
-  return {
-    generatedAt: doc.x_ollama.generated_at,
-    modelsHash: doc.x_ollama.models_hash,
-    models: usableModels(doc.provider.models),
-  };
+  return usableModels(doc.provider.models);
 }

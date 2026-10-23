@@ -1,7 +1,7 @@
 {
   "name": "@srnoob2570/opencode-ollama-cloud",
   "version": "0.1.13",
-  "description": "opencode plugin: live Ollama Cloud model catalog, served from srnoob2570/ollama-cloud-catalog",
+  "description": "opencode 2.x plugin: live Ollama Cloud model catalog with official pricing",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -18,42 +18,20 @@
   "main": "./plugin/index.ts",
   "exports": {
     ".": "./plugin/index.ts",
-    "./server": "./plugin/index.ts",
-    "./tui": "./plugin/tui.js"
+    "./server": "./plugin/index.ts"
   },
   "files": [
     "plugin/catalog.ts",
-    "plugin/debug-sink.ts",
-    "plugin/ensure-tui.ts",
     "plugin/index.ts",
-    "plugin/models.ts",
-    "plugin/self-update.ts",
-    "plugin/server-v2.ts",
-    "plugin/stats.ts",
-    "plugin/capture.ts",
-    "plugin/handoff.ts",
-    "plugin/tui-display.ts",
-    "plugin/tui.tsx",
-    "plugin/tui.js",
-    "plugin/version.ts"
+    "plugin/models.ts"
   ],
   "scripts": {
-    "build:tui": "bun build plugin/tui.tsx --target=bun --format=esm --external '*' --outfile plugin/tui.js",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
-  "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.18.0"
-  },
   "devDependencies": {
-    "@opencode-ai/plugin": "1.18.32",
-    "@opencode-ai/sdk": "1.18.32",
-    "@opentui/solid": "^0.5.12",
     "@types/bun": "^1.4.0",
     "@types/node": "^24.0.0",
     "typescript": "5.9.3"
-  },
-  "dependencies": {
-    "jsonc-parser": "^3.3.1"
   }
 }
