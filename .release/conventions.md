@@ -22,7 +22,8 @@
 - The workflow refuses a tag that does not match `package.json`'s version,
   and tolerates a re-pushed tag when the version is already on the registry.
 - The tag's subject is the released section's first changelog entry and its
-  body is the whole section; `gh release create v<x.y.z> --title v<x.y.z>
+  body is the whole section flattened (category headings stripped), as v0.1.12
+  and v0.1.13 do; `gh release create v<x.y.z> --title v<x.y.z>
 --notes-from-tag` builds the GitHub release from it.
 - The release memory was a single legacy `.release-state.json` until
   v0.1.13, which migrated it to `.release/`.

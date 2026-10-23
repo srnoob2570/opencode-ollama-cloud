@@ -3,7 +3,7 @@
 Entries here follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [SemVer](https://semver.org/spec/v2.0.0.html).
 Each version also lives on the [releases page](https://github.com/srnoob2570/opencode-ollama-cloud/releases).
 
-## [Unreleased]
+## [0.2.0] - 2026-10-23 (d4989b0)
 
 ### Removed
 
@@ -17,6 +17,8 @@ Each version also lives on the [releases page](https://github.com/srnoob2570/ope
 - `loadCatalog` returns the normalized models directly; the unused `Catalog` wrapper (`generatedAt`/`modelsHash`) is gone.
 - `CatalogModel` only keeps the fields the opencode 2.x record consumes. `family`, `quantization` and the raw `input` list no longer survive normalization.
 - `README.md` / `README.es.md` are opencode 2.x only: install, how it works, the three remaining options and pricing. The V1 instructions, support matrix, stats/TUI/self-update sections and their screenshots are gone.
+
+**Full changelog:** https://github.com/srnoob2570/opencode-ollama-cloud/compare/v0.1.13...v0.2.0
 
 ## [0.1.13] - 2026-10-17 (df30057)
 
